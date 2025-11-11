@@ -1,4 +1,4 @@
-# canvas.py with updates for group move and real-time legend move
+# canvas.py with fixes for real-time group move and perimeter grab
 #Управление канвасом canvas.py
 # Автор: Grok
 # Обновлено: November 11, 2025, 11:30 AM CET
@@ -201,9 +201,45 @@ class MapCanvas(QGraphicsView):
         # === Обновляем выделение ===
         self.update_selection_graphics()
 
+    def update_node_graphics(self, node, ntype):
+        key = (node["id"], ntype)
+        if key not in self.node_items:
+            return
+        items = self.node_items[key]
+        x = node["xy"]["x"]
+        y = node["xy"]["y"]
+        
+        if ntype == "legend":
+            w = float(node.get("width", 100))
+            h = float(node.get("height", 50))
+            rect_item = next((i for i in items if isinstance(i, QGraphicsRectItem)), None)
+            text_item = next((i for i in items if isinstance(i, QGraphicsTextItem)), None)
+            if rect_item:
+                rect_item.setRect(x, y, w, h)
+            if text_item:
+                text_rect = text_item.boundingRect()
+                text_item.setPos(x + (w - text_rect.width()) / 2, y + (h - text_rect.height()) / 2)
+        else:
+            main_item = next((i for i in items if isinstance(i, QGraphicsPixmapItem) or isinstance(i, QGraphicsRectItem)), None)
+            text_item = next((i for i in items if isinstance(i, QGraphicsTextItem)), None)
+            overlay_item = next((i for i in items if isinstance(i, QGraphicsPixmapItem) and i != main_item), None)
+            
+            if isinstance(main_item, QGraphicsPixmapItem):
+                w, h = main_item.pixmap().width(), main_item.pixmap().height()
+                main_item.setPos(x - w/2, y - h/2)
+                if overlay_item:
+                    overlay_item.setPos(x - w/2, y - h/2)
+            elif isinstance(main_item, QGraphicsRectItem):
+                w, h = 15, 13  # fixed for no image
+                main_item.setRect(x - 7.5, y - 6.5, w, h)
+            
+            if text_item:
+                text_item.setPos(x - text_item.boundingRect().width()/2, y + h/2 + 15)
+
     def update_magistrals(self, all_nodes=None):
+        # Remove old magistral items
         for item in self.magistral_items:
-            if item.scene() is not None:
+            if item.scene() == self.scene:
                 self.scene.removeItem(item)
         self.magistral_items = []
 
@@ -272,20 +308,30 @@ class MapCanvas(QGraphicsView):
                 event.accept()
                 return
 
-            # Режим редактирования: начать перетаскивание
+            # Режим редактирования: начать перетаскивание, но для legend только если на периметре
             if self.is_edit_mode and result:
                 node, ntype, key = result
-                self.dragged_node = node
-                self.dragged_type = ntype
-                self.drag_start_pos = scene_pos
-                event.accept()
-                return
+                if ntype == "legend":
+                    rect = self.get_node_rect(node, ntype)
+                    if not self.is_on_perimeter(scene_pos, rect):
+                        result = None  # Не начинать drag, если не на периметре
+                if result:
+                    self.dragged_node = node
+                    self.dragged_type = ntype
+                    self.drag_start_pos = scene_pos
+                    # Добавляем выделение при старте перемещения
+                    if (node, ntype, key) not in self.selected_nodes:
+                        self.selected_nodes.append((node, ntype, key))
+                    self.update_selection_graphics()
+                    event.accept()
+                    return
 
             # Групповое перетаскивание
             if self.is_edit_mode and result and any(n[0] is result[0] for n in self.selected_nodes):
                 self.drag_group = True
                 self.drag_start_pos = scene_pos
                 self.group_drag_offset = [(scene_pos.x() - n[0]["xy"]["x"], scene_pos.y() - n[0]["y"]) for n in self.selected_nodes]
+                self.update_selection_graphics()  # Показываем выделение
                 event.accept()
                 return
 
@@ -319,6 +365,7 @@ class MapCanvas(QGraphicsView):
                 new_y = self.drag_start_pos.y() - oy + dy
                 node["xy"]["x"] = new_x
                 node["xy"]["y"] = new_y
+                self.update_node_graphics(node, ntype)
             self.update_magistrals()
             self.update_selection_graphics()
             event.accept()
@@ -328,6 +375,7 @@ class MapCanvas(QGraphicsView):
         if self.dragged_node:
             self.dragged_node["xy"]["x"] = scene_pos.x()
             self.dragged_node["xy"]["y"] = scene_pos.y()
+            self.update_node_graphics(self.dragged_node, self.dragged_type)
             self.update_magistrals()
             self.update_selection_graphics()
             event.accept()
@@ -486,6 +534,10 @@ class MapCanvas(QGraphicsView):
         self.update_selection_graphics()
 
     # === УТИЛИТЫ ===
+    def is_on_perimeter(self, pos, rect, thickness=5):
+        inner_rect = rect.adjusted(thickness, thickness, -thickness, -thickness)
+        return rect.contains(pos) and not inner_rect.contains(pos)
+
     def find_node_by_position(self, pos):
         closest = None
         min_dist = float('inf')
@@ -509,8 +561,8 @@ class MapCanvas(QGraphicsView):
             w = float(item.get("width", 100))
             h = float(item.get("height", 50))
             item_rect = QRectF(x, y, w, h)
-            if item_rect.contains(pos):
-                dist = 0  # Inside rect, priority
+            if self.is_on_perimeter(pos, item_rect):
+                dist = 0  # Priority for perimeter
                 if dist < min_dist:
                     min_dist = dist
                     closest = (item, "legend", "legends")
