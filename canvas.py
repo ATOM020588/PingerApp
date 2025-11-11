@@ -295,31 +295,30 @@ class MapCanvas(QGraphicsView):
             scene_pos = self.mapToScene(event.position().toPoint())
             result = self.find_node_by_position(scene_pos)
 
-            # Shift + клик
+            # Shift + клик — добавление/снятие
             if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                 if result:
                     node, ntype, key = result
-                    tup = (node, ntype, key)
-                    if tup in self.selected_nodes:
-                        self.selected_nodes.remove(tup)
-                    else:
-                        self.selected_nodes.append(tup)
-                    self.update_selection_graphics()
-                    event.accept()
-                    return
-                event.accept()
-                return
+                    node_rect = self.get_node_rect(node, ntype)
+                    if node_rect.contains(scene_pos):
+                        tup = (node, ntype, key)
+                        if tup in self.selected_nodes:
+                            self.selected_nodes.remove(tup)
+                        else:
+                            self.selected_nodes.append(tup)
+                        self.update_selection_graphics()
+                    return  # ← Только return
+                return  # ← Только return
 
-# === ОДИНОЧНОЕ ИЛИ ГРУППОВОЕ ПЕРЕМЕЩЕНИЕ ===
+            # === ОДИНОЧНОЕ ИЛИ ГРУППОВОЕ ПЕРЕМЕЩЕНИЕ ===
             if self.is_edit_mode:
-                # 1. Проверяем, попал ли клик в любой из ВЫДЕЛЕННЫХ объектов
+                # 1. Групповое — клик по любому объекту в группе
                 if self.selected_nodes:
                     clicked_on_selected = any(
                         self.get_node_rect(n[0], n[1]).contains(scene_pos)
                         for n in self.selected_nodes
                     )
                     if clicked_on_selected:
-                        # ← ГРУППОВОЕ ПЕРЕМЕЩЕНИЕ
                         self.drag_group = True
                         self.drag_start_pos = scene_pos
                         self.group_drag_offset = [
@@ -328,41 +327,38 @@ class MapCanvas(QGraphicsView):
                             for n in self.selected_nodes
                         ]
                         self.update_selection_graphics()
-                        event.accept()
-                        return
+                        return  # ← Только return
 
-                # 2. Если НЕ в группе — проверяем одиночное
+                # 2. Одиночное — только если весь объект в клике
                 if result:
                     node, ntype, key = result
-                    # Легенды — только по периметру
-                    if ntype == "legend" and not self.is_on_perimeter(scene_pos, self.get_node_rect(node, ntype)):
-                        result = None
-                    if result:
-                        self.dragged_node = node
-                        self.dragged_type = ntype
-                        self.drag_start_pos = scene_pos
-                        # Если не в группе — создаём новое выделение
-                        if (node, ntype, key) not in self.selected_nodes:
-                            self.selected_nodes = [(node, ntype, key)]
-                        self.update_selection_graphics()
-                        event.accept()
-                        return
+                    node_rect = self.get_node_rect(node, ntype)
+                    if node_rect.contains(scene_pos):
+                        if ntype == "legend" and not self.is_on_perimeter(scene_pos, node_rect):
+                            pass
+                        else:
+                            self.dragged_node = node
+                            self.dragged_type = ntype
+                            self.drag_start_pos = scene_pos
+                            if (node, ntype, key) not in self.selected_nodes:
+                                self.selected_nodes = [(node, ntype, key)]
+                            self.update_selection_graphics()
+                            return  # ← Только return
 
-            # Рамка
+            # Рамка — только в пустоту
             if not result:
                 self.selection_start = scene_pos
                 self.selected_nodes = []
                 self.clear_selection_graphics()
-                event.accept()
-                return
+                return  # ← Только return
 
+        # === ПКМ паннинг ===
         elif event.button() == Qt.MouseButton.RightButton:
             self._panning = True
             self._last_pos = event.position().toPoint()
             self._context_menu_pos = event.position().toPoint()
             self._moved_during_rmb = False
-            event.accept()
-            return
+            return  # ← Только return
 
         super().mousePressEvent(event)
 
@@ -486,7 +482,9 @@ class MapCanvas(QGraphicsView):
             (self.map_data.get("legends", []), "legend", "legends")
         ]:
             for item in items:
-                if rect.intersects(self.get_node_rect(item, ntype)):
+                item_rect = self.get_node_rect(item, ntype)
+                # ← ТОЛЬКО ПОЛНОЕ ВЛОЖЕНИЕ
+                if rect.contains(item_rect):
                     self.selected_nodes.append((item, ntype, key))
         self.update_selection_graphics()
 
