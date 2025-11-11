@@ -1,25 +1,30 @@
-#Управление канвасом canvas.py
+# canvas.py
+# Управление канвасом
 # Автор: Grok
-# Обновлено: November 11, 2025, 09:31 AM CET
+# Обновлено: November 11, 2025, 11:21 AM CET
 # Страна: NL
 
 import sys
 import json
 import os
 import math
-import shutil
 import webbrowser
-import pickle
 import requests
-from PyQt6.QtWidgets import (QGraphicsPixmapItem, QMessageBox, QGraphicsTextItem)
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QMenuBar, QMenu, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QGraphicsView, QGraphicsScene, QDialog, QLineEdit)
-from PyQt6.QtWidgets import (QPushButton, QLabel, QTableWidget, QTableWidgetItem, QFormLayout, QSpinBox, QHeaderView, QComboBox, QListWidget, QCheckBox, QTextEdit, QFileDialog)
-from PyQt6.QtGui import QAction, QColor, QBrush, QPen, QPainter, QPixmap, QIcon
+from PyQt6.QtWidgets import (
+    QGraphicsPixmapItem, QMessageBox, QGraphicsTextItem, QGraphicsRectItem, QGraphicsLineItem,
+    QGraphicsView, QGraphicsScene, QMenu, QDialog, QLineEdit,
+    QPushButton, QLabel, QTableWidget, QTableWidgetItem,
+    QHeaderView, QComboBox, QTextEdit
+)
+from PyQt6.QtGui import QAction, QColor, QBrush, QPen, QPainter, QPixmap
 from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF
-from datetime import datetime
+
+# Импорт диалогов из отдельной папки
+from widgets.switch_info_dialog import SwitchInfoDialog
+from widgets.plan_switch_info_dialog import PlanSwitchInfoDialog
+from widgets.add_planed_switch import AddPlanedSwitch
 
 
-# Класс отрисовки карты
 class MapCanvas(QGraphicsView):
     def __init__(self, map_data=None, parent=None):
         super().__init__(parent)
@@ -82,6 +87,7 @@ class MapCanvas(QGraphicsView):
         print("Rendering map...")
         self.scene.clear()
         self.node_items.clear()
+        self.selection_graphics.clear()  # <-- КРИТИЧЕСКАЯ СТРОКА
         self.scene.setBackgroundBrush(QBrush(QColor("#008080")))
 
         all_nodes = [
@@ -115,44 +121,7 @@ class MapCanvas(QGraphicsView):
                 text.setZValue(-1)
 
         # === МАГИСТРАЛИ ===
-        for link in self.map_data.get("magistrals", []):
-            source = next((n for n in all_nodes if n["id"] == link["startid"]), None)
-            target = next((n for n in all_nodes if n["id"] == link["endid"]), None)
-            if source and target:
-                pen = QPen(QColor(link.get("color", "#000")), float(link.get("width", 1)))
-                if link.get("style") == "psdot":
-                    pen.setDashPattern([5, 5])
-                self.scene.addLine(source["x"], source["y"], target["x"], target["y"], pen)
-
-                for port, node, other, pkey, fkey, ckey in [
-                    (link.get("startport"), source, target, "startport", "startportfar", "startportcolor"),
-                    (link.get("endport"), target, source, "endport", "endportfar", "endportcolor")
-                ]:
-                    if port and port != "0":
-                        dx = other["x"] - node["x"]
-                        dy = other["y"] - node["y"]
-                        length = math.hypot(dx, dy)
-                        dist = float(link.get(fkey, 10))
-                        if length > 0:
-                            dx, dy = dx / length, dy / length
-                            px = node["x"] + dx * dist
-                            py = node["y"] + dy * dist
-                        else:
-                            px, py = node["x"] + dist, node["y"]
-
-                        port_text = self.scene.addText(str(port))
-                        port_text.setDefaultTextColor(QColor(link.get(ckey, "#000080")))
-                        font = port_text.font()
-                        font.setPixelSize(12)
-                        port_text.setFont(font)
-                        rect = port_text.boundingRect()
-                        sq_w = rect.width() + 4
-                        sq_h = 15
-                        self.scene.addRect(px - sq_w/2, py - sq_h/2, sq_w, sq_h,
-                            pen=QPen(QColor(link.get("color", "#000")), 1),
-                            brush=QBrush(QColor("#008080"))).setZValue(0)
-                        port_text.setPos(px - rect.width()/2, py - rect.height()/2)
-                        port_text.setZValue(1)
+        self.update_magistrals(all_nodes)
 
         # === УЗЛЫ (switch, user и т.д.) ===
         for node in all_nodes:
@@ -219,11 +188,70 @@ class MapCanvas(QGraphicsView):
             text_item.setZValue(4)
             items.append(text_item)
 
-            # --- Сохраняем ---
             self.node_items[key] = items
 
         # === Обновляем выделение ===
         self.update_selection_graphics()
+
+    def update_magistrals(self, all_nodes=None):
+        """Перерисовка магистралей без полной очистки сцены"""
+        if all_nodes is None:
+            all_nodes = [
+                *[{**s, "type": "switch", "x": s["xy"]["x"], "y": s["xy"]["y"]} for s in self.map_data.get("switches", [])],
+                *[{**p, "type": "plan_switch", "x": p["xy"]["x"], "y": p["xy"]["y"]} for p in self.map_data.get("plan_switches", [])],
+                *[{**u, "type": "user", "x": u["xy"]["x"], "y": u["xy"]["y"]} for u in self.map_data.get("users", [])],
+                *[{**s, "type": "soap", "x": s["xy"]["x"], "y": s["xy"]["y"]} for s in self.map_data.get("soaps", [])],
+                *[{**l, "type": "legend", "x": l["xy"]["x"], "y": l["xy"]["y"]} for l in self.map_data.get("legends", [])]
+            ]
+
+        # Удаляем только линии и порты
+        for item in self.scene.items():
+            if isinstance(item, QGraphicsTextItem) and item.zValue() == 1:
+                self.scene.removeItem(item)
+            elif isinstance(item, QGraphicsRectItem) and item.zValue() == 0:
+                self.scene.removeItem(item)
+            elif isinstance(item, QGraphicsLineItem):
+                self.scene.removeItem(item)
+
+        # Перерисовываем магистрали
+        for link in self.map_data.get("magistrals", []):
+            source = next((n for n in all_nodes if n["id"] == link["startid"]), None)
+            target = next((n for n in all_nodes if n["id"] == link["endid"]), None)
+            if source and target:
+                pen = QPen(QColor(link.get("color", "#000")), float(link.get("width", 1)))
+                if link.get("style") == "psdot":
+                    pen.setDashPattern([5, 5])
+                self.scene.addLine(source["x"], source["y"], target["x"], target["y"], pen)
+
+                for port, node, other, pkey, fkey, ckey in [
+                    (link.get("startport"), source, target, "startport", "startportfar", "startportcolor"),
+                    (link.get("endport"), target, source, "endport", "endportfar", "endportcolor")
+                ]:
+                    if port and port != "0":
+                        dx = other["x"] - node["x"]
+                        dy = other["y"] - node["y"]
+                        length = math.hypot(dx, dy)
+                        dist = float(link.get(fkey, 10))
+                        if length > 0:
+                            dx, dy = dx / length, dy / length
+                            px = node["x"] + dx * dist
+                            py = node["y"] + dy * dist
+                        else:
+                            px, py = node["x"] + dist, node["y"]
+
+                        port_text = self.scene.addText(str(port))
+                        port_text.setDefaultTextColor(QColor(link.get(ckey, "#000080")))
+                        font = port_text.font()
+                        font.setPixelSize(12)
+                        port_text.setFont(font)
+                        rect = port_text.boundingRect()
+                        sq_w = rect.width() + 4
+                        sq_h = 15
+                        self.scene.addRect(px - sq_w/2, py - sq_h/2, sq_w, sq_h,
+                            pen=QPen(QColor(link.get("color", "#000")), 1),
+                            brush=QBrush(QColor("#008080"))).setZValue(0)
+                        port_text.setPos(px - rect.width()/2, py - rect.height()/2)
+                        port_text.setZValue(1)
 
     # === МЫШЬ ===
     def mousePressEvent(self, event):
@@ -247,8 +275,8 @@ class MapCanvas(QGraphicsView):
                 event.accept()
                 return
 
-            # Клик по выделенному — начать групповое перетаскивание
-            if result and any(n[0] is result[0] for n in self.selected_nodes):
+            # Групповое перетаскивание
+            if self.is_edit_mode and result and any(n[0] is result[0] for n in self.selected_nodes):
                 self.drag_group = True
                 self.drag_start_pos = scene_pos
                 self.group_drag_offset = [(scene_pos.x() - n[0]["xy"]["x"], scene_pos.y() - n[0]["y"]) for n in self.selected_nodes]
@@ -283,6 +311,8 @@ class MapCanvas(QGraphicsView):
             for (node, ntype, _), (ox, oy) in zip(self.selected_nodes, self.group_drag_offset):
                 new_x = self.drag_start_pos.x() - ox + dx
                 new_y = self.drag_start_pos.y() - oy + dy
+                node["xy"]["x"] = new_x
+                node["xy"]["y"] = new_y
                 key = (node["id"], ntype)
                 if key in self.node_items:
                     for item in self.node_items[key]:
@@ -291,6 +321,7 @@ class MapCanvas(QGraphicsView):
                             item.setPos(new_x - w/2, new_y - h/2)
                         elif isinstance(item, QGraphicsTextItem):
                             item.setPos(new_x - item.boundingRect().width()/2, new_y + h/2 + 15)
+            self.update_magistrals()
             self.update_selection_graphics()
             event.accept()
             return
@@ -305,6 +336,9 @@ class MapCanvas(QGraphicsView):
                         item.setPos(scene_pos.x() - w/2, scene_pos.y() - h/2)
                     elif isinstance(item, QGraphicsTextItem):
                         item.setPos(scene_pos.x() - item.boundingRect().width()/2, scene_pos.y() + h/2 + 15)
+            self.dragged_node["xy"]["x"] = scene_pos.x()
+            self.dragged_node["xy"]["y"] = scene_pos.y()
+            self.update_magistrals()
             self.update_selection_graphics()
             event.accept()
             return
@@ -348,7 +382,6 @@ class MapCanvas(QGraphicsView):
                         self.current_hover_type = ntype
                         self.hover_timer.start(2000)
                     return
-            # Сброс
             if self.current_hover_node:
                 self.hover_timer.stop()
                 self.current_hover_node = None
@@ -360,28 +393,20 @@ class MapCanvas(QGraphicsView):
         if event.button() == Qt.MouseButton.LeftButton:
             scene_pos = self.mapToScene(event.position().toPoint())
 
-            # === Группа ===
             if self.drag_group:
-                dx = scene_pos.x() - self.drag_start_pos.x()
-                dy = scene_pos.y() - self.drag_start_pos.y()
-                for (node, _, _), (ox, oy) in zip(self.selected_nodes, self.group_drag_offset):
-                    node["xy"]["x"] = self.drag_start_pos.x() - ox + dx
-                    node["xy"]["y"] = self.drag_start_pos.y() - oy + dy
                 self.drag_group = False
                 self.save_map_to_file()
+                self.show_status_saved()
                 event.accept()
                 return
 
-            # === Один узел ===
             if self.dragged_node:
-                self.dragged_node["xy"]["x"] = scene_pos.x()
-                self.dragged_node["xy"]["y"] = scene_pos.y()
                 self.dragged_node = None
                 self.save_map_to_file()
+                self.show_status_saved()
                 event.accept()
                 return
 
-            # === Рамка ===
             if self.selection_start:
                 self.selection_start = None
                 if self.selection_rect:
@@ -409,7 +434,6 @@ class MapCanvas(QGraphicsView):
 
         super().mouseReleaseEvent(event)
 
-    # === Диалог при наведении ===
     def show_hover_dialog(self):
         if self.current_hover_node and self.current_hover_type == "switch":
             dialog = SwitchInfoDialog(self.current_hover_node, self)
@@ -441,24 +465,27 @@ class MapCanvas(QGraphicsView):
             return
 
         padding = 2
-
         for node, ntype, _ in self.selected_nodes:
             x = node["xy"]["x"]
             y = node["xy"]["y"]
+            key = (node["id"], ntype)
 
             if ntype == "legend":
                 w = float(node.get("width", 100))
                 h = float(node.get("height", 50))
                 rect = QRectF(x, y, w, h)
             else:
-                w, h = self.icon_sizes.get(ntype, (50, 50))
+                items = self.node_items.get(key, [])
+                pixmap_item = next((i for i in items if isinstance(i, QGraphicsPixmapItem)), None)
+                if pixmap_item:
+                    w, h = pixmap_item.pixmap().width(), pixmap_item.pixmap().height()
+                else:
+                    w, h = self.icon_sizes.get(ntype, (50, 50))
                 rect = QRectF(x - w/2, y - h/2, w, h)
 
             padded = rect.adjusted(-padding, -padding, padding, padding)
-
             pen = QPen(QColor("#FFC107"), 1, Qt.PenStyle.DashLine)
-            pen.setDashPattern([2, 2])  # Уменьшенные пунктирные линии
-
+            pen.setDashPattern([2, 2])
             border = self.scene.addRect(padded, pen=pen)
             border.setZValue(999)
             self.selection_graphics.append(border)
@@ -466,7 +493,7 @@ class MapCanvas(QGraphicsView):
     def clear_selection_graphics(self):
         for item in self.selection_graphics[:]:
             try:
-                if item.scene():
+                if item.scene() is not None:
                     item.scene().removeItem(item)
             except:
                 pass
@@ -500,6 +527,10 @@ class MapCanvas(QGraphicsView):
             with open(self.parent.current_map_file, 'w', encoding='utf-8') as f:
                 json.dump(self.map_data, f, ensure_ascii=False, indent=2)
 
+    def show_status_saved(self):
+        if hasattr(self.parent, "status_bar"):
+            self.parent.status_bar.showMessage("Карта успешно сохранена", 3000)
+
     def trigger_parent_edit_button(self):
         QTimer.singleShot(0, self._toggle_edit_mode)
 
@@ -508,6 +539,8 @@ class MapCanvas(QGraphicsView):
             self.parent.edit_button.click()
         else:
             self.is_edit_mode = not self.is_edit_mode
+            if not self.is_edit_mode:
+                self.show_status_saved()
             self.render_map()
 
     def trigger_parent_settings_button(self):
@@ -532,6 +565,7 @@ class MapCanvas(QGraphicsView):
         if dialog.exec():
             self.render_map()
             self.save_map_to_file()
+            self.show_status_saved()
 
     def delete_plan_switch(self, plan_switch):
         msg = self.styled_messagebox(
@@ -547,6 +581,7 @@ class MapCanvas(QGraphicsView):
             self.map_data["plan_switches"].remove(plan_switch)
             self.render_map()
             self.save_map_to_file()
+            self.show_status_saved()
 
     def show_message(self, text):
         QMessageBox.information(self, "Инфо", text)
@@ -566,8 +601,18 @@ class MapCanvas(QGraphicsView):
         return msg
 
     def get_next_id(self, key):
-        ids = [int(item["id"]) for item in self.map_data.get(key, []) if item.get("id")]
-        return max(ids) + 1 if ids else 1
+        """Возвращает следующий свободный числовой ID для списка `key`."""
+        items = self.map_data.get(key, [])
+        valid_ids = []
+        for item in items:
+            raw_id = item.get("id")
+            if raw_id is None:
+                continue
+            try:
+                valid_ids.append(int(raw_id))
+            except (ValueError, TypeError):
+                continue
+        return max(valid_ids) + 1 if valid_ids else 1
 
     # === КОНТЕКСТНОЕ МЕНЮ ===
     def show_context_menu(self, position):
@@ -626,365 +671,3 @@ class MapCanvas(QGraphicsView):
         delete_action.triggered.connect(lambda: self.delete_plan_switch(node))
 
         menu.exec(self.mapToGlobal(position))
-
-
-#Информация о свитче на клик
-class SwitchInfoDialog(QDialog):
-    def __init__(self, switch_data, parent=None):
-        super().__init__(parent)
-        self.switch_data = switch_data
-        self.setWindowTitle("Информация о свитче")
-        self.setFixedSize(800, 600)
-        self.setup_ui()
-
-    def setup_ui(self):
-        layout = QVBoxLayout()
-        self.setLayout(layout)
-
-        header = QHBoxLayout()
-        title = QLabel(self.switch_data.get("name", "Без названия"))
-        title.setStyleSheet("font-size: 12px; font-weight: bold; color: #FFC107;")
-        
-        header.addWidget(title)
-        header.addStretch()
-        layout.addLayout(header)
-
-        # Кнопки
-        btn_layout = QHBoxLayout()
-        refresh_btn = QPushButton("Обновить")
-        pin_btn = QPushButton("Запинить")
-        refresh_btn.clicked.connect(self.refresh_ping)
-        pin_btn.clicked.connect(lambda: self.show_message("Пиннинг не реализован"))
-        btn_layout.addWidget(refresh_btn)
-        btn_layout.addWidget(pin_btn)
-        layout.addLayout(btn_layout)
-
-        # Основные данные
-        info = QHBoxLayout()
-        left = QVBoxLayout()
-        right = QVBoxLayout()
-
-        # Левая колонка: изображение
-        model = self.switch_data.get("model", "").replace(" ", "_")
-        img_label = QLabel()
-        img_label.setFixedHeight(150)
-        img_label.setStyleSheet("background: #444; border: 1px solid #666; border-radius: 6px;")
-        img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        found = False
-        for ext in ["png", "jpg", "jpeg", "gif"]:
-            path = f"images/{model}.{ext}"
-            if QPixmap(path).toImage().width() > 0:
-                pixmap = QPixmap(path).scaled(200, 150, Qt.AspectRatioMode.KeepAspectRatio)
-                img_label.setPixmap(pixmap)
-                found = True
-                break
-        if not found:
-            img_label.setText("Изображение не найдено")
-        left.addWidget(img_label)
-
-        details_btn = QPushButton("Подробнее")
-        details_btn.clicked.connect(self.open_details)
-        left.addWidget(details_btn)
-        left.addStretch()
-
-        # Правая колонка: текст
-        right.addWidget(self.make_label(f"<b>IP:</b> {self.switch_data.get('ip', '—')}"))
-        status = "UP" if self.switch_data.get("pingok") else "DOWN"
-        color = "#4CAF50" if self.switch_data.get("pingok") else "#F44336"
-        right.addWidget(self.make_label(f"<b>Статус:</b> <span style='color:{color}'>{status}</span>"))
-        right.addWidget(self.make_label(f"<b>MAC:</b> {self.switch_data.get('mac', '—')}"))
-        right.addWidget(self.make_label(f"<b>Модель:</b> {self.switch_data.get('model', '—')}"))
-        right.addWidget(self.make_label(f"<b>Uptime:</b> —"))
-        right.addWidget(self.make_label(f"<b>Мастер:</b> {self.switch_data.get('master', '—')}"))
-        right.addWidget(self.make_label(f"<b>Питание:</b> {self.switch_data.get('power', '—')}"))
-
-        # Порты
-        ports_table = QTableWidget()
-        ports_table.setColumnCount(2)
-        ports_table.setHorizontalHeaderLabels(["Порт", "Описание"])
-        ports_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        ports = self.switch_data.get("ports", [])
-        ports_table.setRowCount(len(ports))
-        for i, port in enumerate(ports):
-            num_item = QTableWidgetItem(str(port.get("number", "")))
-            desc_item = QTableWidgetItem(port.get("description", ""))
-            color = port.get("color", "#FFC107")
-            bold = port.get("bold", False)
-            for item in (num_item, desc_item):
-                item.setForeground(QColor(color))
-                if bold:
-                    font = item.font()
-                    font.setBold(True)
-                    item.setFont(font)
-            ports_table.setItem(i, 0, num_item)
-            ports_table.setItem(i, 1, desc_item)
-        right.addWidget(QLabel("<b>Порты:</b>"))
-        right.addWidget(ports_table)
-
-        info.addLayout(left, 1)
-        info.addLayout(right, 2)
-        layout.addLayout(info)
-
-        # Примечание
-        note = self.switch_data.get("note", "")
-        if note:
-            note_edit = QTextEdit()
-            note_edit.setPlainText(note)
-            note_edit.setReadOnly(True)
-            note_edit.setFixedHeight(80)
-            layout.addWidget(QLabel("<b>Примечание:</b>"))
-            layout.addWidget(note_edit)
-
-        # Футер
-        footer = QLabel(f"<b>Последний редактор:</b> {self.switch_data.get('lasteditor', '—')}")
-        footer.setStyleSheet("color: #888; font-size: 12px;")
-        layout.addWidget(footer)
-
-        # Стили
-        self.setStyleSheet("""
-            QDialog { background: #2b2b2b; color: #FFC107; }
-            QLabel { color: #FFC107; }
-            QPushButton { background-color: #333; color: #FFC107; border: none; border-radius: 4px; padding: 10px; }
-            QPushButton:hover { background-color: #555; }
-            QTableWidget { background: #333; color: #FFC107; border: 1px solid #666; }
-            QHeaderView::section { background: #444; color: #FFC107; }
-        """)
-
-    def make_label(self, text):
-        label = QLabel(text)
-        label.setTextFormat(Qt.TextFormat.RichText)
-        return label
-
-    def refresh_ping(self):
-        ip = self.switch_data.get("ip")
-        if not ip:
-            self.show_message("IP не указан")
-            return
-        try:
-            response = requests.get(f"http://your-server/api.php?action=ping_switch&ip={ip}", timeout=3)
-            result = response.json()
-            self.switch_data["pingok"] = result.get("success", False)
-            # Обновляем в map_data
-            list_key = "switches" if self.switch_data.get("type") != "plan_switch" else "plan_switches"
-            for i, s in enumerate(self.parent().map_data[list_key]):
-                if s["id"] == self.switch_data["id"]:
-                    self.parent().map_data[list_key][i] = self.switch_data
-                    break
-            self.parent().render_map()
-            self.close()
-            self.parent().show_switch_info(self.switch_data)
-        except Exception as e:
-            self.show_message(f"Ошибка пинга: {e}")
-
-    def open_details(self):
-        ip = self.switch_data.get("ip")
-        if ip:
-            webbrowser.open(f"http://another-site/neotools/usersonline/index.php?ip={ip}&flood=1")
-        else:
-            self.show_message("IP не указан")
-
-    def show_message(self, text):
-        QMessageBox.information(self, "Инфо", text)
-
-#Окно для планируемого свитча
-class PlanSwitchInfoDialog(QDialog):
-    def __init__(self, plan_switch_data, parent=None):
-        super().__init__(parent)
-        self.plan_switch_data = plan_switch_data
-        self.setWindowTitle("Планируемый свитч")
-        self.setFixedSize(500, 350)
-        self.setup_ui()
-
-    def setup_ui(self):
-        layout = QVBoxLayout()
-        self.setLayout(layout)
-
-        # Заголовок
-        header = QHBoxLayout()
-        title = QLabel(self.plan_switch_data.get("name", "Без названия"))
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #FFD700;")
-        close_btn = QPushButton("X")
-        close_btn.setFixedSize(30, 30)
-        close_btn.setStyleSheet("""
-            QPushButton { background: #FFD700; color: #333; border: none; border-radius: 15px; font-weight: bold; }
-            QPushButton:hover { background: #e6c200; }
-        """)
-        close_btn.clicked.connect(self.close)
-        header.addWidget(title)
-        header.addStretch()
-        header.addWidget(close_btn)
-        layout.addLayout(header)
-
-        # Основные данные
-        info_layout = QVBoxLayout()
-        info_layout.setSpacing(10)
-
-        info_layout.addWidget(self.make_label(f"<b>Модель:</b> {self.plan_switch_data.get('model', '—')}"))
-        info_layout.addWidget(self.make_label(f"<b>Координаты:</b> X: {self.plan_switch_data['xy']['x']}, Y: {self.plan_switch_data['xy']['y']}"))
-
-        # Примечание
-        note = self.plan_switch_data.get("note", "").strip()
-        if note:
-            note_edit = QTextEdit()
-            note_edit.setPlainText(note)
-            note_edit.setReadOnly(True)
-            note_edit.setFixedHeight(120)
-            info_layout.addWidget(QLabel("<b>Примечание:</b>"))
-            info_layout.addWidget(note_edit)
-        else:
-            info_layout.addWidget(QLabel("<i>Примечание отсутствует</i>"))
-
-        layout.addLayout(info_layout)
-        layout.addStretch()
-
-        # Стили
-        self.setStyleSheet("""
-            QDialog { background: #2b2b2b; color: #FFD700; }
-            QLabel { color: #FFD700; margin: 4px 0; }
-            QTextEdit { background: #333; color: #FFD700; border: 1px solid #666; border-radius: 6px; padding: 6px; }
-        """)
-
-    def make_label(self, text):
-        label = QLabel(text)
-        label.setTextFormat(Qt.TextFormat.RichText)
-        return label
-
-# Окно добавления/редактирования
-class AddPlanedSwitch(QDialog):
-    def __init__(self, canvas, position, edit_data=None, parent=None):
-        super().__init__(parent)
-        self.canvas = canvas
-        self.position = position
-        self.edit_data = edit_data
-        self.is_edit = edit_data is not None
-
-        self.setWindowTitle("Редактирование планируемого свитча" if self.is_edit else "Добавление планируемого свитча")
-        self.setFixedSize(500, 230)
-        self.setup_ui()
-
-        if self.is_edit:
-            self.name_input.setText(edit_data.get("name", ""))
-            self.model_combo.setCurrentText(edit_data.get("model", ""))
-            self.note_field.setPlainText(edit_data.get("note", ""))
-
-    def setup_ui(self):
-        outer_layout = QVBoxLayout()
-        self.setLayout(outer_layout)
-
-        # Заголовок
-        title = QLabel("Планируемый управляемый свитч")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("font-weight: bold; margin: 5px;")
-        outer_layout.addWidget(title)
-
-        # Горизонтальный layout: лево + право
-        main_layout = QHBoxLayout()
-        #
-        #main_layout.addWidget(QLabel("Примечание:"))
-        outer_layout.addLayout(main_layout)
-
-        # Левая колонка
-        left_layout = QVBoxLayout()
-        
-        self.name_input = QLineEdit()
-        self.name_input.setMaxLength(50)
-        self.name_input.setFixedWidth(200)
-        self.name_input.setFixedHeight(25)
-        left_layout.addWidget(QLabel("Название свитча:"))
-        left_layout.addWidget(self.name_input)
-        left_layout.addWidget(QLabel("Выберите модель:"))
-        self.model_combo = QComboBox()
-        self.model_combo.setFixedWidth(200)
-        self.model_combo.setFixedHeight(25)
-        self.load_models()
-        left_layout.addWidget(self.model_combo)
-        left_layout.addStretch()
-
-        # Правая колонка
-        right_layout = QVBoxLayout()
-        
-        self.note_field = QTextEdit()
-        self.note_field.setPlaceholderText("Введите примечание...")
-        self.note_field.setFixedWidth(250)
-        self.note_field.setFixedHeight(120)
-        right_layout.addWidget(self.note_field)
-
-        main_layout.addLayout(left_layout, 1)
-        main_layout.addLayout(right_layout, 2)
-
-        # Кнопки
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-
-        ok_button = QPushButton("ОК")
-        ok_button.setFixedWidth(100)
-        ok_button.clicked.connect(self.accept_and_add)
-
-        cancel_button = QPushButton("Отмена")
-        cancel_button.setFixedWidth(100)
-        cancel_button.clicked.connect(self.reject)
-
-        button_layout.addWidget(ok_button)
-        button_layout.addWidget(cancel_button)
-        button_layout.addStretch()
-        outer_layout.addLayout(button_layout)
-
-        # Стили
-        self.setStyleSheet("""
-            QDialog { background-color: #2b2b2b; color: #FFC107; }
-            QLabel { color: #FFC107; font-size: 13px; }
-            QLineEdit, QComboBox, QTextEdit {
-                background-color: #444; color: #FFC107;
-                border: 1px solid #666; border-radius: 4px; padding: 4px;
-            }
-            QPushButton { 
-                background-color: #333; color: #FFC107;
-                border: none; border-radius: 6px; padding: 8px 16px;
-                min-width: 80px;
-            }
-            QPushButton:hover { background-color: #FFC107; color: #333; }
-        """)
-
-    def load_models(self):
-        try:
-            with open("models/models.json", "r", encoding="utf-8") as f:
-                data = json.load(f)
-                models = data.get("models", []) if isinstance(data, dict) else data
-                model_names = [m["model_name"] for m in models if isinstance(m, dict) and "model_name" in m]
-                if model_names:
-                    self.model_combo.addItems(model_names)
-                else:
-                    self.model_combo.addItem("Нет моделей")
-        except Exception as e:
-            print(f"Ошибка загрузки models.json: {e}")
-            self.model_combo.addItem("Ошибка загрузки")
-
-    def accept_and_add(self):
-        name = self.name_input.text().strip()
-        if not name:
-            name = f"Планируемый свитч {len(self.canvas.map_data['plan_switches']) + 1}"
-
-        model = self.model_combo.currentText()
-        note = self.note_field.toPlainText().strip()
-
-        if self.is_edit:
-            # Обновляем существующий
-            self.edit_data["name"] = name
-            self.edit_data["model"] = model
-            self.edit_data["note"] = note
-            print(f"Обновлен plan_switch в map_data: {self.edit_data}")
-        else:
-            # Добавляем новый
-            new_id = self.canvas.get_next_id("plan_switches")
-            new_switch = {
-                "id": new_id,
-                "name": name,
-                "xy": {"x": self.position.x(), "y": self.position.y()},
-                "model": model,
-                "note": note
-            }
-            self.canvas.map_data["plan_switches"].append(new_switch)
-            print(f"Добавлен plan_switch в map_data: {new_switch}")
-
-        self.canvas.render_map()
-        self.accept()
