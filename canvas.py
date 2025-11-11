@@ -1,7 +1,7 @@
-# canvas.py
-# Управление канвасом
+# canvas.py with updates for group move and real-time legend move
+#Управление канвасом canvas.py
 # Автор: Grok
-# Обновлено: November 11, 2025, 11:21 AM CET
+# Обновлено: November 11, 2025, 11:30 AM CET
 # Страна: NL
 
 import sys
@@ -20,21 +20,24 @@ from PyQt6.QtGui import QAction, QColor, QBrush, QPen, QPainter, QPixmap
 from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF
 
 # Импорт диалогов из отдельной папки
-from widgets.switch_info_dialog import SwitchInfoDialog
-from widgets.plan_switch_info_dialog import PlanSwitchInfoDialog
-from widgets.add_planed_switch import AddPlanedSwitch
+from widgets import SwitchInfoDialog, PlanSwitchInfoDialog, AddPlanedSwitch
 
 
+# Класс отрисовки карты
 class MapCanvas(QGraphicsView):
     def __init__(self, map_data=None, parent=None):
         super().__init__(parent)
         self.parent = parent
         self.scene = QGraphicsScene()
         self.setScene(self.scene)
+
+        # ИНИЦИАЛИЗАЦИЯ map_data ПЕРВОЙ!
         self.map_data = map_data or {
             "map": {"name": "Unnamed", "width": "1200", "height": "800"},
             "switches": [], "plan_switches": [], "users": [], "soaps": [], "legends": [], "magistrals": []
         }
+
+        # --- Остальные атрибуты ПОСЛЕ ---
         self.setStyleSheet("border-radius: 12px; border: 3px solid #3d3d3d;")
         self.setSceneRect(0, 0, int(self.map_data["map"].get("width", "1200")), int(self.map_data["map"].get("height", "800")))
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -61,6 +64,7 @@ class MapCanvas(QGraphicsView):
 
         # --- Ссылки на графические элементы ---
         self.node_items = {}  # {(id, type): [QGraphicsItem, ...]}
+        self.magistral_items = []
 
         # --- Размеры иконок ---
         self.icon_sizes = {
@@ -81,13 +85,15 @@ class MapCanvas(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
+        # ← Только после инициализации ВСЕГО!
         self.render_map()
 
     def render_map(self):
         print("Rendering map...")
         self.scene.clear()
+        self.magistral_items = []
         self.node_items.clear()
-        self.selection_graphics.clear()  # <-- КРИТИЧЕСКАЯ СТРОКА
+        self.selection_graphics.clear()  # ← Очистка старых выделений
         self.scene.setBackgroundBrush(QBrush(QColor("#008080")))
 
         all_nodes = [
@@ -119,6 +125,8 @@ class MapCanvas(QGraphicsView):
                 font.setBold(True)
                 text.setFont(font)
                 text.setZValue(-1)
+                key = (node["id"], "legend")
+                self.node_items[key] = [legend, text]
 
         # === МАГИСТРАЛИ ===
         self.update_magistrals(all_nodes)
@@ -194,26 +202,20 @@ class MapCanvas(QGraphicsView):
         self.update_selection_graphics()
 
     def update_magistrals(self, all_nodes=None):
-        """Перерисовка магистралей без полной очистки сцены"""
+        for item in self.magistral_items:
+            if item.scene() is not None:
+                self.scene.removeItem(item)
+        self.magistral_items = []
+
         if all_nodes is None:
             all_nodes = [
                 *[{**s, "type": "switch", "x": s["xy"]["x"], "y": s["xy"]["y"]} for s in self.map_data.get("switches", [])],
                 *[{**p, "type": "plan_switch", "x": p["xy"]["x"], "y": p["xy"]["y"]} for p in self.map_data.get("plan_switches", [])],
                 *[{**u, "type": "user", "x": u["xy"]["x"], "y": u["xy"]["y"]} for u in self.map_data.get("users", [])],
                 *[{**s, "type": "soap", "x": s["xy"]["x"], "y": s["xy"]["y"]} for s in self.map_data.get("soaps", [])],
-                *[{**l, "type": "legend", "x": l["xy"]["x"], "y": l["xy"]["y"]} for l in self.map_data.get("legends", [])]
+                *[{**l, "type": "legend", "x": l["xy"]["x"], "y": l["xy"]["y"], "name": l["text"]} for l in self.map_data.get("legends", [])]
             ]
 
-        # Удаляем только линии и порты
-        for item in self.scene.items():
-            if isinstance(item, QGraphicsTextItem) and item.zValue() == 1:
-                self.scene.removeItem(item)
-            elif isinstance(item, QGraphicsRectItem) and item.zValue() == 0:
-                self.scene.removeItem(item)
-            elif isinstance(item, QGraphicsLineItem):
-                self.scene.removeItem(item)
-
-        # Перерисовываем магистрали
         for link in self.map_data.get("magistrals", []):
             source = next((n for n in all_nodes if n["id"] == link["startid"]), None)
             target = next((n for n in all_nodes if n["id"] == link["endid"]), None)
@@ -221,7 +223,8 @@ class MapCanvas(QGraphicsView):
                 pen = QPen(QColor(link.get("color", "#000")), float(link.get("width", 1)))
                 if link.get("style") == "psdot":
                     pen.setDashPattern([5, 5])
-                self.scene.addLine(source["x"], source["y"], target["x"], target["y"], pen)
+                line = self.scene.addLine(source["x"], source["y"], target["x"], target["y"], pen)
+                self.magistral_items.append(line)
 
                 for port, node, other, pkey, fkey, ckey in [
                     (link.get("startport"), source, target, "startport", "startportfar", "startportcolor"),
@@ -247,11 +250,14 @@ class MapCanvas(QGraphicsView):
                         rect = port_text.boundingRect()
                         sq_w = rect.width() + 4
                         sq_h = 15
-                        self.scene.addRect(px - sq_w/2, py - sq_h/2, sq_w, sq_h,
+                        sq_rect = self.scene.addRect(px - sq_w/2, py - sq_h/2, sq_w, sq_h,
                             pen=QPen(QColor(link.get("color", "#000")), 1),
-                            brush=QBrush(QColor("#008080"))).setZValue(0)
+                            brush=QBrush(QColor("#008080")))
+                        sq_rect.setZValue(0)
                         port_text.setPos(px - rect.width()/2, py - rect.height()/2)
                         port_text.setZValue(1)
+                        self.magistral_items.append(sq_rect)
+                        self.magistral_items.append(port_text)
 
     # === МЫШЬ ===
     def mousePressEvent(self, event):
@@ -313,14 +319,6 @@ class MapCanvas(QGraphicsView):
                 new_y = self.drag_start_pos.y() - oy + dy
                 node["xy"]["x"] = new_x
                 node["xy"]["y"] = new_y
-                key = (node["id"], ntype)
-                if key in self.node_items:
-                    for item in self.node_items[key]:
-                        if isinstance(item, QGraphicsPixmapItem):
-                            w, h = item.pixmap().width(), item.pixmap().height()
-                            item.setPos(new_x - w/2, new_y - h/2)
-                        elif isinstance(item, QGraphicsTextItem):
-                            item.setPos(new_x - item.boundingRect().width()/2, new_y + h/2 + 15)
             self.update_magistrals()
             self.update_selection_graphics()
             event.accept()
@@ -328,14 +326,6 @@ class MapCanvas(QGraphicsView):
 
         # === Одиночное перетаскивание ===
         if self.dragged_node:
-            key = (self.dragged_node["id"], self.dragged_type)
-            if key in self.node_items:
-                for item in self.node_items[key]:
-                    if isinstance(item, QGraphicsPixmapItem):
-                        w, h = item.pixmap().width(), item.pixmap().height()
-                        item.setPos(scene_pos.x() - w/2, scene_pos.y() - h/2)
-                    elif isinstance(item, QGraphicsTextItem):
-                        item.setPos(scene_pos.x() - item.boundingRect().width()/2, scene_pos.y() + h/2 + 15)
             self.dragged_node["xy"]["x"] = scene_pos.x()
             self.dragged_node["xy"]["y"] = scene_pos.y()
             self.update_magistrals()
@@ -393,6 +383,7 @@ class MapCanvas(QGraphicsView):
         if event.button() == Qt.MouseButton.LeftButton:
             scene_pos = self.mapToScene(event.position().toPoint())
 
+            # === Группа ===
             if self.drag_group:
                 self.drag_group = False
                 self.save_map_to_file()
@@ -400,6 +391,7 @@ class MapCanvas(QGraphicsView):
                 event.accept()
                 return
 
+            # === Один узел ===
             if self.dragged_node:
                 self.dragged_node = None
                 self.save_map_to_file()
@@ -407,6 +399,7 @@ class MapCanvas(QGraphicsView):
                 event.accept()
                 return
 
+            # === Рамка ===
             if self.selection_start:
                 self.selection_start = None
                 if self.selection_rect:
@@ -434,6 +427,7 @@ class MapCanvas(QGraphicsView):
 
         super().mouseReleaseEvent(event)
 
+    # === Диалог при наведении ===
     def show_hover_dialog(self):
         if self.current_hover_node and self.current_hover_type == "switch":
             dialog = SwitchInfoDialog(self.current_hover_node, self)
@@ -455,7 +449,8 @@ class MapCanvas(QGraphicsView):
             (self.map_data.get("legends", []), "legend", "legends")
         ]:
             for item in items:
-                if rect.contains(QPointF(item["xy"]["x"], item["xy"]["y"])):
+                item_rect = self.get_node_rect(item, ntype)
+                if rect.intersects(item_rect):
                     self.selected_nodes.append((item, ntype, key))
         self.update_selection_graphics()
 
@@ -465,27 +460,14 @@ class MapCanvas(QGraphicsView):
             return
 
         padding = 2
+
         for node, ntype, _ in self.selected_nodes:
-            x = node["xy"]["x"]
-            y = node["xy"]["y"]
-            key = (node["id"], ntype)
+            node_rect = self.get_node_rect(node, ntype)
+            padded = node_rect.adjusted(-padding, -padding, padding, padding)
 
-            if ntype == "legend":
-                w = float(node.get("width", 100))
-                h = float(node.get("height", 50))
-                rect = QRectF(x, y, w, h)
-            else:
-                items = self.node_items.get(key, [])
-                pixmap_item = next((i for i in items if isinstance(i, QGraphicsPixmapItem)), None)
-                if pixmap_item:
-                    w, h = pixmap_item.pixmap().width(), pixmap_item.pixmap().height()
-                else:
-                    w, h = self.icon_sizes.get(ntype, (50, 50))
-                rect = QRectF(x - w/2, y - h/2, w, h)
-
-            padded = rect.adjusted(-padding, -padding, padding, padding)
             pen = QPen(QColor("#FFC107"), 1, Qt.PenStyle.DashLine)
             pen.setDashPattern([2, 2])
+
             border = self.scene.addRect(padded, pen=pen)
             border.setZValue(999)
             self.selection_graphics.append(border)
@@ -505,22 +487,52 @@ class MapCanvas(QGraphicsView):
 
     # === УТИЛИТЫ ===
     def find_node_by_position(self, pos):
-        tolerance = 50
         closest = None
         min_dist = float('inf')
         for items, ntype, key in [
             (self.map_data.get("switches", []), "switch", "switches"),
             (self.map_data.get("plan_switches", []), "plan_switch", "plan_switches"),
             (self.map_data.get("users", []), "user", "users"),
-            (self.map_data.get("soaps", []), "soap", "soaps"),
-            (self.map_data.get("legends", []), "legend", "legends")
+            (self.map_data.get("soaps", []), "soap", "soaps")
         ]:
             for item in items:
-                dist = math.hypot(pos.x() - item["xy"]["x"], pos.y() - item["xy"]["y"])
-                if dist < min_dist and dist < tolerance:
+                item_rect = self.get_node_rect(item, ntype)
+                if item_rect.contains(pos):
+                    dist = math.hypot(pos.x() - item["xy"]["x"], pos.y() - item["xy"]["y"])
+                    if dist < min_dist:
+                        min_dist = dist
+                        closest = (item, ntype, key)
+
+        for item in self.map_data.get("legends", []):
+            x = item["xy"]["x"]
+            y = item["xy"]["y"]
+            w = float(item.get("width", 100))
+            h = float(item.get("height", 50))
+            item_rect = QRectF(x, y, w, h)
+            if item_rect.contains(pos):
+                dist = 0  # Inside rect, priority
+                if dist < min_dist:
                     min_dist = dist
-                    closest = (item, ntype, key)
+                    closest = (item, "legend", "legends")
+
         return closest
+
+    def get_node_rect(self, node, ntype):
+        x = node["xy"]["x"]
+        y = node["xy"]["y"]
+        if ntype == "legend":
+            w = float(node.get("width", 100))
+            h = float(node.get("height", 50))
+            return QRectF(x, y, w, h)
+        else:
+            key = (node["id"], ntype)
+            items = self.node_items.get(key, [])
+            pixmap_item = next((i for i in items if isinstance(i, QGraphicsPixmapItem)), None)
+            if pixmap_item:
+                w, h = pixmap_item.pixmap().width(), pixmap_item.pixmap().height()
+            else:
+                w, h = self.icon_sizes.get(ntype, (50, 50))
+            return QRectF(x - w/2, y - h/2, w, h)
 
     def save_map_to_file(self):
         if hasattr(self.parent, "current_map_file") and self.parent.current_map_file:

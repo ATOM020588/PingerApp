@@ -1876,8 +1876,27 @@ class MainWindow(QMainWindow):
         """)
 
         self.setGeometry(100, 100, 1200, 900)
+        
+        
+        self.status_bar = self.statusBar()
+        self.status_bar.setFixedHeight(20)
+        self.status_bar.setStyleSheet("""
+            QStatusBar { background-color: #333; color: #FFC107; font-size: 12px; }
+            QStatusBar::item { border: none; padding: 5px 20px; }
+        """)
+
         self.load_open_maps()
 
+    def update_status_bar(self):
+        if self.active_map_id:
+            map_info = self.map_data.get(self.active_map_id, {}).get("map", {})
+            last_adm = map_info.get("last_adm", "Неизвестно")
+            mod_time = map_info.get("mod_time", "Неизвестно")
+            self.status_bar.showMessage(f"Последние изменения: {last_adm} в {mod_time}")
+        else:
+            self.status_bar.clearMessage()
+    
+    
     def load_open_maps(self):
         try:
             if os.path.exists("open_maps.pkl"):
@@ -1887,8 +1906,10 @@ class MainWindow(QMainWindow):
                     self.active_map_id = self.open_maps[0]["id"]
                     self.open_map(self.active_map_id)
                     self.update_tabs()
+                    self.update_status_bar()
         except Exception as e:
-            self.show_toast(f"Ошибка загрузки открытых карт: {str(e)}", "error")
+            self.status_bar.showMessage("Ошибка загрузки открытых карт", 3000)
+            QTimer.singleShot(3000, self.update_status_bar)
 
     def save_open_maps(self):
         try:
@@ -1940,6 +1961,9 @@ class MainWindow(QMainWindow):
         self.save_map()
         self.save_open_maps()
         self.update_tabs()
+        self.update_status_bar()
+        self.status_bar.showMessage("Карта успешно сохранена", 3000)
+        QTimer.singleShot(3000, self.update_status_bar)
         self.show_toast(f"Карта '{name}' создана", "success")
 
     def show_open_map_dialog(self):
@@ -1957,10 +1981,12 @@ class MainWindow(QMainWindow):
                 self.active_map_id = map_id
                 self.open_map(map_id)
                 self.update_tabs()
+                self.update_status_bar()
                 self.show_toast(f"Карта '{map_id}' открыта", "success")
             else:
                 self.active_map_id = map_id
                 self.update_tabs()
+                self.update_status_bar()
                 self.show_toast(f"Карта '{map_id}' уже открыта", "info")
 
     def save_map(self):
@@ -1975,9 +2001,11 @@ class MainWindow(QMainWindow):
             self.map_data[self.active_map_id]["map"]["mod_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             with open(map_file, "w", encoding="utf-8") as f:
                 json.dump(self.map_data[self.active_map_id], f, ensure_ascii=False, indent=4)
-            self.show_toast("Карта успешно сохранена", "success")
+            self.status_bar.showMessage("Карта успешно сохранена", 3000)
+            QTimer.singleShot(3000, self.update_status_bar)
         except Exception as e:
-            self.show_toast(f"Ошибка сохранения карты: {str(e)}", "error")
+            self.status_bar.showMessage("Ошибка сохранения карты", 3000)
+            QTimer.singleShot(3000, self.update_status_bar)
 
     def show_map_settings_dialog(self):
         if not self.active_map_id:
@@ -2015,7 +2043,9 @@ class MainWindow(QMainWindow):
         for switch_device in self.map_data[self.active_map_id]["switches"]:
             switch_device["pingok"] = bool(switch_device.get("ip"))
         self.update_tabs()
-        self.show_toast("Пинг устройств завершен", "success")
+        self.update_status_bar()
+        self.status_bar.showMessage("Пинг устройств завершен", 3000)
+        QTimer.singleShot(3000, self.update_status_bar)
 
     def toggle_edit_mode(self):
         self.is_edit_mode = not self.is_edit_mode
