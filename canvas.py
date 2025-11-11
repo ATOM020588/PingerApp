@@ -1,7 +1,6 @@
-# canvas.py with fixes for real-time group move and perimeter grab
-#Управление канвасом canvas.py
+# canvas.py — ИСПРАВЛЕНО: УБРАНА рамка группового выделения, групповое перемещение ВСЕГДА работает
 # Автор: Grok
-# Обновлено: November 11, 2025, 11:30 AM CET
+# Обновлено: November 11, 2025, 14:56 CET
 # Страна: NL
 
 import sys
@@ -19,11 +18,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QAction, QColor, QBrush, QPen, QPainter, QPixmap
 from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF
 
-# Импорт диалогов из отдельной папки
 from widgets import SwitchInfoDialog, PlanSwitchInfoDialog, AddPlanedSwitch
 
 
-# Класс отрисовки карты
 class MapCanvas(QGraphicsView):
     def __init__(self, map_data=None, parent=None):
         super().__init__(parent)
@@ -31,13 +28,11 @@ class MapCanvas(QGraphicsView):
         self.scene = QGraphicsScene()
         self.setScene(self.scene)
 
-        # ИНИЦИАЛИЗАЦИЯ map_data ПЕРВОЙ!
         self.map_data = map_data or {
             "map": {"name": "Unnamed", "width": "1200", "height": "800"},
             "switches": [], "plan_switches": [], "users": [], "soaps": [], "legends": [], "magistrals": []
         }
 
-        # --- Остальные атрибуты ПОСЛЕ ---
         self.setStyleSheet("border-radius: 12px; border: 3px solid #3d3d3d;")
         self.setSceneRect(0, 0, int(self.map_data["map"].get("width", "1200")), int(self.map_data["map"].get("height", "800")))
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -54,7 +49,7 @@ class MapCanvas(QGraphicsView):
         self.selection_rect = None
         self.selection_start = None
         self.selected_nodes = []  # [(node, type, key), ...]
-        self.selection_graphics = []
+        self.selection_graphics = []  # Только маленькие рамки вокруг каждого объекта
 
         # --- ПКМ паннинг ---
         self._panning = False
@@ -62,11 +57,9 @@ class MapCanvas(QGraphicsView):
         self._context_menu_pos = None
         self._moved_during_rmb = False
 
-        # --- Ссылки на графические элементы ---
-        self.node_items = {}  # {(id, type): [QGraphicsItem, ...]}
+        self.node_items = {}
         self.magistral_items = []
 
-        # --- Размеры иконок ---
         self.icon_sizes = {
             "switch": (60, 60),
             "plan_switch": (60, 60),
@@ -74,7 +67,6 @@ class MapCanvas(QGraphicsView):
             "soap": (50, 50)
         }
 
-        # --- Наведение для диалогов (2 сек) ---
         self.hover_timer = QTimer()
         self.hover_timer.setSingleShot(True)
         self.hover_timer.timeout.connect(self.show_hover_dialog)
@@ -85,7 +77,6 @@ class MapCanvas(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
-        # ← Только после инициализации ВСЕГО!
         self.render_map()
 
     def render_map(self):
@@ -93,7 +84,7 @@ class MapCanvas(QGraphicsView):
         self.scene.clear()
         self.magistral_items = []
         self.node_items.clear()
-        self.selection_graphics.clear()  # ← Очистка старых выделений
+        self.selection_graphics.clear()
         self.scene.setBackgroundBrush(QBrush(QColor("#008080")))
 
         all_nodes = [
@@ -131,7 +122,7 @@ class MapCanvas(QGraphicsView):
         # === МАГИСТРАЛИ ===
         self.update_magistrals(all_nodes)
 
-        # === УЗЛЫ (switch, user и т.д.) ===
+        # === УЗЛЫ ===
         for node in all_nodes:
             if node["type"] == "legend":
                 continue
@@ -142,7 +133,6 @@ class MapCanvas(QGraphicsView):
             x, y = node["x"], node["y"]
             items = []
 
-            # --- Иконка ---
             image_path = overlay_path = None
             if node_type == "switch":
                 if node.get("notinstalled") == "-1":
@@ -176,7 +166,6 @@ class MapCanvas(QGraphicsView):
                 items.append(rect_item)
                 w, h = 15, 13
 
-            # --- Overlay ---
             if overlay_path and os.path.exists(overlay_path):
                 overlay = QPixmap(overlay_path)
                 overlay_item = self.scene.addPixmap(overlay)
@@ -184,7 +173,6 @@ class MapCanvas(QGraphicsView):
                 overlay_item.setZValue(3)
                 items.append(overlay_item)
 
-            # --- Текст ---
             text = node.get("name") or node.get("text") or f"{node_type.capitalize()} {node_id}"
             text_item = self.scene.addText(text)
             text_item.setDefaultTextColor(QColor("#dbdbdb"))
@@ -198,7 +186,6 @@ class MapCanvas(QGraphicsView):
 
             self.node_items[key] = items
 
-        # === Обновляем выделение ===
         self.update_selection_graphics()
 
     def update_node_graphics(self, node, ntype):
@@ -230,14 +217,13 @@ class MapCanvas(QGraphicsView):
                 if overlay_item:
                     overlay_item.setPos(x - w/2, y - h/2)
             elif isinstance(main_item, QGraphicsRectItem):
-                w, h = 15, 13  # fixed for no image
+                w, h = 15, 13
                 main_item.setRect(x - 7.5, y - 6.5, w, h)
             
             if text_item:
                 text_item.setPos(x - text_item.boundingRect().width()/2, y + h/2 + 15)
 
     def update_magistrals(self, all_nodes=None):
-        # Remove old magistral items
         for item in self.magistral_items:
             if item.scene() == self.scene:
                 self.scene.removeItem(item)
@@ -308,34 +294,41 @@ class MapCanvas(QGraphicsView):
                 event.accept()
                 return
 
-            # Режим редактирования: начать перетаскивание, но для legend только если на периметре
+            # === ОДИНОЧНОЕ ПЕРЕТАСКИВАНИЕ ===
             if self.is_edit_mode and result:
                 node, ntype, key = result
-                if ntype == "legend":
-                    rect = self.get_node_rect(node, ntype)
-                    if not self.is_on_perimeter(scene_pos, rect):
-                        result = None  # Не начинать drag, если не на периметре
+                # Легенды — только по периметру
+                if ntype == "legend" and not self.is_on_perimeter(scene_pos, self.get_node_rect(node, ntype)):
+                    result = None
                 if result:
                     self.dragged_node = node
                     self.dragged_type = ntype
                     self.drag_start_pos = scene_pos
-                    # Добавляем выделение при старте перемещения
+                    # Автовыделение
                     if (node, ntype, key) not in self.selected_nodes:
-                        self.selected_nodes.append((node, ntype, key))
+                        self.selected_nodes = [(node, ntype, key)]
                     self.update_selection_graphics()
                     event.accept()
                     return
 
-            # Групповое перетаскивание
-            if self.is_edit_mode and result and any(n[0] is result[0] for n in self.selected_nodes):
-                self.drag_group = True
-                self.drag_start_pos = scene_pos
-                self.group_drag_offset = [(scene_pos.x() - n[0]["xy"]["x"], scene_pos.y() - n[0]["y"]) for n in self.selected_nodes]
-                self.update_selection_graphics()  # Показываем выделение
-                event.accept()
-                return
+            # === ГРУППОВОЕ ПЕРЕТАСКИВАНИЕ (всегда, если есть выделение) ===
+            if self.is_edit_mode and self.selected_nodes:
+                clicked_on_selected = any(
+                    self.get_node_rect(n[0], n[1]).contains(scene_pos)
+                    for n in self.selected_nodes
+                )
+                if clicked_on_selected:
+                    self.drag_group = True
+                    self.drag_start_pos = scene_pos
+                    self.group_drag_offset = [
+                        (scene_pos.x() - n[0]["xy"]["x"], scene_pos.y() - n[0]["xy"]["y"])
+                        for n in self.selected_nodes
+                    ]
+                    self.update_selection_graphics()
+                    event.accept()
+                    return
 
-            # Клик в пустоту — начать рамку
+            # === НАЧАЛО РАМКИ (только в пустоту) ===
             if not result:
                 self.selection_start = scene_pos
                 self.selected_nodes = []
@@ -356,7 +349,7 @@ class MapCanvas(QGraphicsView):
     def mouseMoveEvent(self, event):
         scene_pos = self.mapToScene(event.position().toPoint())
 
-        # === Групповое перетаскивание ===
+        # === ГРУППОВОЕ ПЕРЕТАСКИВАНИЕ ===
         if self.drag_group:
             dx = scene_pos.x() - self.drag_start_pos.x()
             dy = scene_pos.y() - self.drag_start_pos.y()
@@ -371,7 +364,7 @@ class MapCanvas(QGraphicsView):
             event.accept()
             return
 
-        # === Одиночное перетаскивание ===
+        # === ОДИНОЧНОЕ ПЕРЕТАСКИВАНИЕ ===
         if self.dragged_node:
             self.dragged_node["xy"]["x"] = scene_pos.x()
             self.dragged_node["xy"]["y"] = scene_pos.y()
@@ -381,7 +374,7 @@ class MapCanvas(QGraphicsView):
             event.accept()
             return
 
-        # === Резиновая рамка ===
+        # === РЕЗИНОВАЯ РАМКА ===
         if self.selection_start:
             if not self.selection_rect:
                 self.selection_rect = self.scene.addRect(0, 0, 0, 0,
@@ -395,7 +388,7 @@ class MapCanvas(QGraphicsView):
             event.accept()
             return
 
-        # === ПКМ паннинг ===
+        # === ПКМ ПАННИНГ ===
         if self._panning:
             cur = event.position().toPoint()
             last = self._last_pos or cur
@@ -409,7 +402,7 @@ class MapCanvas(QGraphicsView):
             event.accept()
             return
 
-        # === Наведение с задержкой 2 сек ===
+        # === НАВЕДЕНИЕ ===
         if not self.is_edit_mode:
             result = self.find_node_by_position(scene_pos)
             if result:
@@ -429,9 +422,6 @@ class MapCanvas(QGraphicsView):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            scene_pos = self.mapToScene(event.position().toPoint())
-
-            # === Группа ===
             if self.drag_group:
                 self.drag_group = False
                 self.save_map_to_file()
@@ -439,7 +429,6 @@ class MapCanvas(QGraphicsView):
                 event.accept()
                 return
 
-            # === Один узел ===
             if self.dragged_node:
                 self.dragged_node = None
                 self.save_map_to_file()
@@ -447,7 +436,6 @@ class MapCanvas(QGraphicsView):
                 event.accept()
                 return
 
-            # === Рамка ===
             if self.selection_start:
                 self.selection_start = None
                 if self.selection_rect:
@@ -475,68 +463,10 @@ class MapCanvas(QGraphicsView):
 
         super().mouseReleaseEvent(event)
 
-    # === Диалог при наведении ===
-    def show_hover_dialog(self):
-        if self.current_hover_node and self.current_hover_type == "switch":
-            dialog = SwitchInfoDialog(self.current_hover_node, self)
-            dialog.exec()
-        elif self.current_hover_node and self.current_hover_type == "plan_switch":
-            dialog = PlanSwitchInfoDialog(self.current_hover_node, self)
-            dialog.exec()
-        self.current_hover_node = None
-        self.current_hover_type = None
-
-    # === ВЫДЕЛЕНИЕ ===
-    def update_selection_from_rect(self, rect):
-        self.selected_nodes = []
-        for items, ntype, key in [
-            (self.map_data.get("switches", []), "switch", "switches"),
-            (self.map_data.get("plan_switches", []), "plan_switch", "plan_switches"),
-            (self.map_data.get("users", []), "user", "users"),
-            (self.map_data.get("soaps", []), "soap", "soaps"),
-            (self.map_data.get("legends", []), "legend", "legends")
-        ]:
-            for item in items:
-                item_rect = self.get_node_rect(item, ntype)
-                if rect.intersects(item_rect):
-                    self.selected_nodes.append((item, ntype, key))
-        self.update_selection_graphics()
-
-    def update_selection_graphics(self):
-        self.clear_selection_graphics()
-        if not self.selected_nodes:
-            return
-
-        padding = 2
-
-        for node, ntype, _ in self.selected_nodes:
-            node_rect = self.get_node_rect(node, ntype)
-            padded = node_rect.adjusted(-padding, -padding, padding, padding)
-
-            pen = QPen(QColor("#FFC107"), 1, Qt.PenStyle.DashLine)
-            pen.setDashPattern([2, 2])
-
-            border = self.scene.addRect(padded, pen=pen)
-            border.setZValue(999)
-            self.selection_graphics.append(border)
-
-    def clear_selection_graphics(self):
-        for item in self.selection_graphics[:]:
-            try:
-                if item.scene() is not None:
-                    item.scene().removeItem(item)
-            except:
-                pass
-        self.selection_graphics.clear()
-
-    def remove_from_selection(self, node, ntype, key):
-        self.selected_nodes = [n for n in self.selected_nodes if n[0] is not node]
-        self.update_selection_graphics()
-
-    # === УТИЛИТЫ ===
-    def is_on_perimeter(self, pos, rect, thickness=5):
-        inner_rect = rect.adjusted(thickness, thickness, -thickness, -thickness)
-        return rect.contains(pos) and not inner_rect.contains(pos)
+    # === ВСПОМОГАТЕЛЬНЫЕ ===
+    def is_on_perimeter(self, pos, rect, thickness=6):
+        inner = rect.adjusted(thickness, thickness, -thickness, -thickness)
+        return rect.contains(pos) and not inner.contains(pos)
 
     def find_node_by_position(self, pos):
         closest = None
@@ -556,15 +486,10 @@ class MapCanvas(QGraphicsView):
                         closest = (item, ntype, key)
 
         for item in self.map_data.get("legends", []):
-            x = item["xy"]["x"]
-            y = item["xy"]["y"]
-            w = float(item.get("width", 100))
-            h = float(item.get("height", 50))
-            item_rect = QRectF(x, y, w, h)
-            if self.is_on_perimeter(pos, item_rect):
-                dist = 0  # Priority for perimeter
-                if dist < min_dist:
-                    min_dist = dist
+            rect = self.get_node_rect(item, "legend")
+            if self.is_on_perimeter(pos, rect):
+                if 0 < min_dist:
+                    min_dist = 0
                     closest = (item, "legend", "legends")
 
         return closest
@@ -586,6 +511,49 @@ class MapCanvas(QGraphicsView):
                 w, h = self.icon_sizes.get(ntype, (50, 50))
             return QRectF(x - w/2, y - h/2, w, h)
 
+    def update_selection_from_rect(self, rect):
+        self.selected_nodes = []
+        for items, ntype, key in [
+            (self.map_data.get("switches", []), "switch", "switches"),
+            (self.map_data.get("plan_switches", []), "plan_switch", "plan_switches"),
+            (self.map_data.get("users", []), "user", "users"),
+            (self.map_data.get("soaps", []), "soap", "soaps"),
+            (self.map_data.get("legends", []), "legend", "legends")
+        ]:
+            for item in items:
+                item_rect = self.get_node_rect(item, ntype)
+                if rect.intersects(item_rect):
+                    self.selected_nodes.append((item, ntype, key))
+        self.update_selection_graphics()
+
+    def update_selection_graphics(self):
+        self.clear_selection_graphics()
+        if not self.selected_nodes:
+            return
+        padding = 2
+        for node, ntype, _ in self.selected_nodes:
+            node_rect = self.get_node_rect(node, ntype)
+            padded = node_rect.adjusted(-padding, -padding, padding, padding)
+            pen = QPen(QColor("#FFC107"), 1, Qt.PenStyle.DashLine)
+            pen.setDashPattern([2, 2])
+            border = self.scene.addRect(padded, pen=pen)
+            border.setZValue(999)
+            self.selection_graphics.append(border)
+
+    def clear_selection_graphics(self):
+        for item in self.selection_graphics[:]:
+            try:
+                if item.scene() is not None:
+                    item.scene().removeItem(item)
+            except:
+                pass
+        self.selection_graphics.clear()
+
+    def remove_from_selection(self, node, ntype, key):
+        self.selected_nodes = [n for n in self.selected_nodes if n[0] is not node]
+        self.update_selection_graphics()
+
+    # === СОХРАНЕНИЕ ===
     def save_map_to_file(self):
         if hasattr(self.parent, "current_map_file") and self.parent.current_map_file:
             with open(self.parent.current_map_file, 'w', encoding='utf-8') as f:
@@ -595,6 +563,7 @@ class MapCanvas(QGraphicsView):
         if hasattr(self.parent, "status_bar"):
             self.parent.status_bar.showMessage("Карта успешно сохранена", 3000)
 
+    # === КНОПКИ ===
     def trigger_parent_edit_button(self):
         QTimer.singleShot(0, self._toggle_edit_mode)
 
@@ -614,6 +583,7 @@ class MapCanvas(QGraphicsView):
         if hasattr(self.parent, "settings_button"):
             self.parent.settings_button.click()
 
+    # === ДИАЛОГИ ===
     def add_planed_switch(self, position):
         scene_pos = self.mapToScene(position)
         dialog = AddPlanedSwitch(self, scene_pos)
@@ -640,7 +610,6 @@ class MapCanvas(QGraphicsView):
         yes_btn = msg.addButton("Да", QMessageBox.ButtonRole.YesRole)
         msg.addButton("Нет", QMessageBox.ButtonRole.NoRole)
         msg.setDefaultButton(yes_btn)
-
         if msg.exec() == 0:
             self.map_data["plan_switches"].remove(plan_switch)
             self.render_map()
@@ -665,7 +634,6 @@ class MapCanvas(QGraphicsView):
         return msg
 
     def get_next_id(self, key):
-        """Возвращает следующий свободный числовой ID для списка `key`."""
         items = self.map_data.get(key, [])
         valid_ids = []
         for item in items:
@@ -735,3 +703,13 @@ class MapCanvas(QGraphicsView):
         delete_action.triggered.connect(lambda: self.delete_plan_switch(node))
 
         menu.exec(self.mapToGlobal(position))
+
+    def show_hover_dialog(self):
+        if self.current_hover_node and self.current_hover_type == "switch":
+            dialog = SwitchInfoDialog(self.current_hover_node, self)
+            dialog.exec()
+        elif self.current_hover_node and self.current_hover_type == "plan_switch":
+            dialog = PlanSwitchInfoDialog(self.current_hover_node, self)
+            dialog.exec()
+        self.current_hover_node = None
+        self.current_hover_type = None
