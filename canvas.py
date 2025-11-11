@@ -1,4 +1,8 @@
 #Управление канвасом canvas.py
+# Автор: Grok
+# Обновлено: November 11, 2025, 09:31 AM CET
+# Страна: NL
+
 import sys
 import json
 import os
@@ -60,6 +64,13 @@ class MapCanvas(QGraphicsView):
             "user": (50, 50),
             "soap": (50, 50)
         }
+
+        # --- Наведение для диалогов (2 сек) ---
+        self.hover_timer = QTimer()
+        self.hover_timer.setSingleShot(True)
+        self.hover_timer.timeout.connect(self.show_hover_dialog)
+        self.current_hover_node = None
+        self.current_hover_type = None
 
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
@@ -240,7 +251,7 @@ class MapCanvas(QGraphicsView):
             if result and any(n[0] is result[0] for n in self.selected_nodes):
                 self.drag_group = True
                 self.drag_start_pos = scene_pos
-                self.group_drag_offset = [(scene_pos.x() - n[0]["xy"]["x"], scene_pos.y() - n[0]["xy"]["y"]) for n in self.selected_nodes]
+                self.group_drag_offset = [(scene_pos.x() - n[0]["xy"]["x"], scene_pos.y() - n[0]["y"]) for n in self.selected_nodes]
                 event.accept()
                 return
 
@@ -326,6 +337,23 @@ class MapCanvas(QGraphicsView):
             event.accept()
             return
 
+        # === Наведение с задержкой 2 сек ===
+        if not self.is_edit_mode:
+            result = self.find_node_by_position(scene_pos)
+            if result:
+                node, ntype, _ = result
+                if ntype in ("switch", "plan_switch"):
+                    if self.current_hover_node != node:
+                        self.current_hover_node = node
+                        self.current_hover_type = ntype
+                        self.hover_timer.start(2000)
+                    return
+            # Сброс
+            if self.current_hover_node:
+                self.hover_timer.stop()
+                self.current_hover_node = None
+                self.current_hover_type = None
+
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -381,6 +409,17 @@ class MapCanvas(QGraphicsView):
 
         super().mouseReleaseEvent(event)
 
+    # === Диалог при наведении ===
+    def show_hover_dialog(self):
+        if self.current_hover_node and self.current_hover_type == "switch":
+            dialog = SwitchInfoDialog(self.current_hover_node, self)
+            dialog.exec()
+        elif self.current_hover_node and self.current_hover_type == "plan_switch":
+            dialog = PlanSwitchInfoDialog(self.current_hover_node, self)
+            dialog.exec()
+        self.current_hover_node = None
+        self.current_hover_type = None
+
     # === ВЫДЕЛЕНИЕ ===
     def update_selection_from_rect(self, rect):
         self.selected_nodes = []
@@ -392,8 +431,7 @@ class MapCanvas(QGraphicsView):
             (self.map_data.get("legends", []), "legend", "legends")
         ]:
             for item in items:
-                x, y = item["xy"]["x"], item["xy"]["y"]
-                if rect.contains(QPointF(x, y)):
+                if rect.contains(QPointF(item["xy"]["x"], item["xy"]["y"])):
                     self.selected_nodes.append((item, ntype, key))
         self.update_selection_graphics()
 
@@ -403,11 +441,11 @@ class MapCanvas(QGraphicsView):
             return
 
         padding = 2
-        group_min_x = group_min_y = float('inf')
-        group_max_x = group_max_y = float('-inf')
 
         for node, ntype, _ in self.selected_nodes:
-            x, y = node["xy"]["x"], node["xy"]["y"]
+            x = node["xy"]["x"]
+            y = node["xy"]["y"]
+
             if ntype == "legend":
                 w = float(node.get("width", 100))
                 h = float(node.get("height", 50))
@@ -415,22 +453,15 @@ class MapCanvas(QGraphicsView):
             else:
                 w, h = self.icon_sizes.get(ntype, (50, 50))
                 rect = QRectF(x - w/2, y - h/2, w, h)
+
             padded = rect.adjusted(-padding, -padding, padding, padding)
-            border = self.scene.addRect(padded, pen=QPen(QColor("#FFC107"), 1, Qt.PenStyle.DashLine))
+
+            pen = QPen(QColor("#FFC107"), 1, Qt.PenStyle.DashLine)
+            pen.setDashPattern([2, 2])  # Уменьшенные пунктирные линии
+
+            border = self.scene.addRect(padded, pen=pen)
             border.setZValue(999)
             self.selection_graphics.append(border)
-
-            group_min_x = min(group_min_x, padded.left())
-            group_min_y = min(group_min_y, padded.top())
-            group_max_x = max(group_max_x, padded.right())
-            group_max_y = max(group_max_y, padded.bottom())
-
-        if len(self.selected_nodes) > 1:
-            group_rect = QRectF(group_min_x, group_min_y, group_max_x - group_min_x, group_max_y - group_min_y)
-            group_rect.adjust(-padding, -padding, padding, padding)
-            gborder = self.scene.addRect(group_rect, pen=QPen(QColor("#FFC107"), 1, Qt.PenStyle.DashLine))
-            gborder.setZValue(998)
-            self.selection_graphics.append(gborder)
 
     def clear_selection_graphics(self):
         for item in self.selection_graphics[:]:
@@ -444,82 +475,19 @@ class MapCanvas(QGraphicsView):
     def remove_from_selection(self, node, ntype, key):
         self.selected_nodes = [n for n in self.selected_nodes if n[0] is not node]
         self.update_selection_graphics()
-        
-    # === КОНТЕКСТНОЕ МЕНЮ ===
-    def show_context_menu(self, position):
-        menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu { background-color: #333; color: #FFC107; border: 1px solid #FFC107; border-radius: 4px; }
-            QMenu::item { padding: 8px 16px; background-color: #333; }
-            QMenu::item:selected { background-color: #555; }
-            QMenu::item:disabled { color: #777; }
-        """)
-
-        toggle_edit_action = menu.addAction("Выключить редактирование" if self.is_edit_mode else "Включить редактирование")
-        toggle_edit_action.triggered.connect(self.trigger_parent_edit_button)
-
-        add_menu = menu.addMenu("Добавить")
-        add_menu.setEnabled(self.is_edit_mode)
-        add_switch_action = add_menu.addAction("Упр. свитч")
-        add_plan_switch_action = add_menu.addAction("Планируемый упр. свитч")
-        add_user_action = add_menu.addAction("Клиента")
-        add_magistral_action = add_menu.addAction("Магистраль")
-        add_soap_action = add_menu.addAction("Мыльницу")
-        add_legend_action = add_menu.addAction("Таблицу")
-
-        add_switch_action.triggered.connect(lambda: self.add_node("switch", position))
-        add_plan_switch_action.triggered.connect(lambda: self.add_node("plan_switch", position))
-        add_user_action.triggered.connect(lambda: self.add_node("user", position))
-        add_magistral_action.triggered.connect(lambda: self.add_node("magistral", position))
-        add_soap_action.triggered.connect(lambda: self.add_node("soap", position))
-        add_legend_action.triggered.connect(lambda: self.add_node("legend", position))
-
-        map_settings_action = menu.addAction("Параметры карты")
-        map_settings_action.setEnabled(self.is_edit_mode)
-        map_settings_action.triggered.connect(self.trigger_parent_settings_button)
-
-        global_pos = self.mapToGlobal(position)
-        menu.exec(global_pos)
-
-    def show_plan_switch_context_menu(self, position, plan_switch):
-        menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu { background-color: #333; color: #FFC107; border: 1px solid #FFC107; border-radius: 4px; }
-            QMenu::item { padding: 8px 16px; background-color: #333; }
-            QMenu::item:selected { background-color: #555; }
-            QMenu::item:disabled { color: #777; }
-        """)
-
-        edit_action = menu.addAction("Редактировать")
-        config_action = menu.addAction("Настроить")
-        delete_action = menu.addAction("Удалить план. свитч")
-
-        edit_action.setEnabled(self.is_edit_mode)
-        config_action.setEnabled(self.is_edit_mode)
-        delete_action.setEnabled(self.is_edit_mode)
-
-        edit_action.triggered.connect(lambda: self.edit_plan_switch(plan_switch))
-        config_action.triggered.connect(lambda: self.show_message("Настройка не реализована"))
-        delete_action.triggered.connect(lambda: self.delete_plan_switch(plan_switch))
-
-        global_pos = self.mapToGlobal(position)
-        menu.exec(global_pos)
-        
-        
 
     # === УТИЛИТЫ ===
     def find_node_by_position(self, pos):
         tolerance = 50
-        candidates = [
+        closest = None
+        min_dist = float('inf')
+        for items, ntype, key in [
             (self.map_data.get("switches", []), "switch", "switches"),
             (self.map_data.get("plan_switches", []), "plan_switch", "plan_switches"),
             (self.map_data.get("users", []), "user", "users"),
             (self.map_data.get("soaps", []), "soap", "soaps"),
             (self.map_data.get("legends", []), "legend", "legends")
-        ]
-        closest = None
-        min_dist = float('inf')
-        for items, ntype, key in candidates:
+        ]:
             for item in items:
                 dist = math.hypot(pos.x() - item["xy"]["x"], pos.y() - item["xy"]["y"])
                 if dist < min_dist and dist < tolerance:
@@ -531,26 +499,32 @@ class MapCanvas(QGraphicsView):
         if hasattr(self.parent, "current_map_file") and self.parent.current_map_file:
             with open(self.parent.current_map_file, 'w', encoding='utf-8') as f:
                 json.dump(self.map_data, f, ensure_ascii=False, indent=2)
-                
+
     def trigger_parent_edit_button(self):
-        parent = self.window()
-        if hasattr(parent, "edit_button"):
-            parent.edit_button.click()
+        QTimer.singleShot(0, self._toggle_edit_mode)
+
+    def _toggle_edit_mode(self):
+        if hasattr(self.parent, "edit_button"):
+            self.parent.edit_button.click()
         else:
-            print("Родительское окно не имеет кнопки edit_button")
+            self.is_edit_mode = not self.is_edit_mode
+            self.render_map()
 
     def trigger_parent_settings_button(self):
-        parent = self.window()
-        if hasattr(parent, "settings_button"):
-            parent.settings_button.click()
-            print("Имитация клика по кнопке 'Параметры карты'")
-        else:
-            print("Родительское окно не имеет кнопки settings_button")
+        QTimer.singleShot(0, self._open_settings)
+
+    def _open_settings(self):
+        if hasattr(self.parent, "settings_button"):
+            self.parent.settings_button.click()
+
+    def add_planed_switch(self, position):
+        scene_pos = self.mapToScene(position)
+        dialog = AddPlanedSwitch(self, scene_pos)
+        dialog.exec()
 
     def add_node(self, node_type, position):
         scene_pos = self.mapToScene(position)
         print(f"Adding {node_type} at scene position ({scene_pos.x()}, {scene_pos.y()})")
-        # Реализуйте добавление по типу
 
     def edit_plan_switch(self, plan_switch):
         position = QPointF(plan_switch["xy"]["x"], plan_switch["xy"]["y"])
@@ -590,27 +564,70 @@ class MapCanvas(QGraphicsView):
             QMessageBox QPushButton:pressed { background-color: #e6b800; }
         """)
         return msg
-            
-            
-        
-        
-    # === MESSAGE BOX ===       
-    def styled_messagebox(self, title, text, icon=QMessageBox.Icon.Question, buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No):
-        msg = QMessageBox(self)
-        msg.setWindowTitle(title)
-        msg.setText(text)
-        msg.setIcon(icon)
-        msg.setStyleSheet("""
-            QMessageBox { background-color: #333; color: #FFC107; border: 1px solid #FFC107; border: 0px; }
-            QMessageBox QLabel { color: #FFC107; font-size: 12px; border: 0px; }
-            QMessageBox QPushButton { background-color: #333; color: #FFC107; border: 1px solid #444; border-radius: 4px; padding: 0px 0px; min-width: 100px; min-height: 35px; font-weight: bold; }
-            QMessageBox QPushButton:hover { background-color: #FFC107; color: #333; }
-            QMessageBox QPushButton:pressed { background-color: #e6b800; }
+
+    def get_next_id(self, key):
+        ids = [int(item["id"]) for item in self.map_data.get(key, []) if item.get("id")]
+        return max(ids) + 1 if ids else 1
+
+    # === КОНТЕКСТНОЕ МЕНЮ ===
+    def show_context_menu(self, position):
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu { background-color: #333; color: #FFC107; border: 1px solid #FFC107; border-radius: 4px; }
+            QMenu::item { padding: 8px 16px; background-color: #333; }
+            QMenu::item:selected { background-color: #555; }
+            QMenu::item:disabled { color: #777; }
         """)
-        return msg
-    
-    
-    
+
+        toggle_edit_action = menu.addAction("Выключить редактирование" if self.is_edit_mode else "Включить редактирование")
+        toggle_edit_action.triggered.connect(self.trigger_parent_edit_button)
+
+        add_menu = menu.addMenu("Добавить")
+        add_menu.setEnabled(self.is_edit_mode)
+        add_switch_action = add_menu.addAction("Упр. свитч")
+        add_plan_switch_action = add_menu.addAction("Планируемый упр. свитч")
+        add_user_action = add_menu.addAction("Клиента")
+        add_magistral_action = add_menu.addAction("Магистраль")
+        add_soap_action = add_menu.addAction("Мыльницу")
+        add_legend_action = add_menu.addAction("Таблицу")
+
+        add_switch_action.triggered.connect(lambda: self.add_node("switch", position))
+        add_plan_switch_action.triggered.connect(lambda: self.add_planed_switch(position))
+        add_user_action.triggered.connect(lambda: self.add_node("user", position))
+        add_magistral_action.triggered.connect(lambda: self.add_node("magistral", position))
+        add_soap_action.triggered.connect(lambda: self.add_node("soap", position))
+        add_legend_action.triggered.connect(lambda: self.add_node("legend", position))
+
+        map_settings_action = menu.addAction("Параметры карты")
+        map_settings_action.setEnabled(self.is_edit_mode)
+        map_settings_action.triggered.connect(self.trigger_parent_settings_button)
+
+        menu.exec(self.mapToGlobal(position))
+
+    def show_plan_switch_context_menu(self, position, node):
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu { background-color: #333; color: #FFC107; border: 1px solid #FFC107; border-radius: 4px; }
+            QMenu::item { padding: 8px 16px; background-color: #333; }
+            QMenu::item:selected { background-color: #555; }
+            QMenu::item:disabled { color: #777; }
+        """)
+
+        edit_action = menu.addAction("Редактировать")
+        config_action = menu.addAction("Настроить")
+        delete_action = menu.addAction("Удалить план. свитч")
+
+        edit_action.setEnabled(self.is_edit_mode)
+        config_action.setEnabled(self.is_edit_mode)
+        delete_action.setEnabled(self.is_edit_mode)
+
+        edit_action.triggered.connect(lambda: self.edit_plan_switch(node))
+        config_action.triggered.connect(lambda: self.show_message("Настройка не реализована"))
+        delete_action.triggered.connect(lambda: self.delete_plan_switch(node))
+
+        menu.exec(self.mapToGlobal(position))
+
+
 #Информация о свитче на клик
 class SwitchInfoDialog(QDialog):
     def __init__(self, switch_data, parent=None):
