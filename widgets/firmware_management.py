@@ -13,7 +13,7 @@ class FirmwareManagementDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Управление прошивками")
-        self.setFixedSize(800, 600)
+        self.setFixedSize(800, 700)
         self.models = []
         self.firmwares = []
         self.selected_model_id = None
@@ -26,11 +26,14 @@ class FirmwareManagementDialog(QDialog):
         self.setLayout(layout)
 
         title = QLabel("Управление прошивками")
+        title.setStyleSheet("""
+            QLabel { color: #FFC107; font-size: 14px; }
+            """)
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
         columns_layout = QHBoxLayout()
-        columns_layout.setSpacing(20)
+        columns_layout.setSpacing(15)
         layout.addLayout(columns_layout)
 
         # Левая колонка — список моделей
@@ -57,19 +60,22 @@ class FirmwareManagementDialog(QDialog):
         # Кнопка сохранения
         buttons_layout = QHBoxLayout()
         self.save_button = QPushButton("Сохранить")
+        self.save_button.setFixedWidth(150)
         self.save_button.clicked.connect(self.save_firmware)
+        layout.addSpacing(10)
         buttons_layout.addWidget(self.save_button)
         layout.addLayout(buttons_layout)
+        layout.addSpacing(10)
 
         # Стили
         self.setStyleSheet("""
             QDialog { background-color: #333; color: #FFC107; border: 1px solid #FFC107; }
-            QLabel { color: #FFC107; font-size: 14px; }
+            QLabel { color: #FFC107; font-size: 12px; }
             QListWidget { background-color: #444; color: #FFC107; border: 1px solid #FFC107; border-radius: 4px; padding: 8px; }
             QListWidget::item:hover { background-color: #555; }
             QListWidget::item:selected { background-color: #75736b; color: #333; }
             QTextEdit { background-color: #444; color: #FFC107; border: 1px solid #FFC107; border-radius: 4px; padding: 8px; }
-            QPushButton { background-color: #333; color: #FFC107; border: none; border-radius: 4px; padding: 10px 20px; }
+            QPushButton { background-color: #444; color: #FFC107; border: none; border: 1px solid #555; border-radius: 4px; padding: 8px 16px; }
             QPushButton:hover { background-color: #555; }
         """)
 
