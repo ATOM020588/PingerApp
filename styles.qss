@@ -1,0 +1,168 @@
+# ============================================================
+# 🎨 QSS — ЕДИНЫЙ СТИЛЬ ОФОРМЛЕНИЯ (Dark Theme + Комментарии)
+# ============================================================
+
+STYLE = """
+/* === 🌑 ОСНОВНОЙ ФОН И ТЕКСТ === */
+QWidget { background-color: #333; color: #FFC107; font-family: "Segoe UI"; font-size: 13px; }
+
+/* === 🪟 QDIALOG / QMAINWINDOW === */
+QDialog, QMainWindow { background-color: #333; color: #FFC107; border: 1px solid #FFC107; }
+
+/* === 🏷️ QLabel — метки === */
+QLabel { color: #FFC107; font-size: 14px; padding: 2px 0px 0px 5px; }
+
+/* === ✏️ QLineEdit — поля ввода === */
+QLineEdit { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; padding: 6px 8px; height: 22px; } 
+QLineEdit:focus { border: 1px solid #FFC107; background-color: #555; }
+
+/* === ⬇️ QComboBox — выпадающие списки === */
+QComboBox { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; height: 22px; } 
+QComboBox::drop-down { border: none; width: 0px; } 
+QComboBox QAbstractItemView { background-color: #444; color: #FFC107; selection-background-color: #555; }
+
+/* === 🔘 QPushButton — кнопки === */
+QPushButton { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; padding: 8px 16px; min-width: 100px; } 
+QPushButton:hover { background-color: #555; } 
+QPushButton:pressed { background-color: #666; }
+
+/* === 🧾 QListWidget — списки === */
+QListWidget { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; padding: 8px; } 
+QListWidget::item:hover { background-color: #555; } 
+QListWidget::item:selected { background-color: #75736b; color: #333; }
+
+/* === 📋 QTableWidget — таблицы === */
+QTableWidget { background-color: #444; color: #FFC107; border: 1px solid #555; gridline-color: #555; border-radius: 4px; } 
+QHeaderView::section { background-color: #555; color: #FFC107; padding: 6px; border: none; font-weight: bold; } 
+QTableWidget::item:hover { background-color: #555; } 
+QTableWidget::item:selected { background-color: #75736b; color: #333; } 
+QTableCornerButton::section { background-color: #555; border: none; }
+
+/* === 🌲 QTreeWidget — древовидные списки === */
+QTreeWidget { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; padding: 4px; } 
+QTreeWidget::item:hover { background-color: #555; } 
+QTreeWidget::item:selected { background-color: #75736b; color: #333; } 
+QTreeView::branch { background: transparent; } 
+QTreeView::branch:closed, QTreeView::branch:open { image: url(none); }
+
+/* === 📊 QProgressBar — индикатор === */
+QProgressBar { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; text-align: center; } 
+QProgressBar::chunk { background-color: #FFC107; width: 20px; margin: 1px; }
+
+/* === 🎚️ QSlider — ползунок === */
+QSlider::groove:horizontal { background: #555; height: 6px; border-radius: 3px; } 
+QSlider::handle:horizontal { background: #FFC107; border: 1px solid #555; width: 14px; margin: -4px 0; border-radius: 7px; }
+
+/* === ✅ QCheckBox / QRadioButton — переключатели === */
+QCheckBox, QRadioButton { color: #FFC107; padding: 3px; } 
+QCheckBox::indicator, QRadioButton::indicator { width: 14px; height: 14px; border: 1px solid #555; background: #444; } 
+QCheckBox::indicator:checked, QRadioButton::indicator:checked { background: #FFC107; }
+
+/* === 📦 QGroupBox — секции === */
+QGroupBox { border: 1px solid #555; border-radius: 6px; margin-top: 10px; padding: 8px; font-weight: bold; color: #FFC107; } 
+QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0px 3px; }
+
+/* === 📁 QMenuBar / QMenu — меню === */
+QMenuBar { background-color: #333; color: #FFC107; } 
+QMenuBar::item:selected { background: #555; } 
+QMenu { background-color: #333; color: #FFC107; border: 1px solid #555; } 
+QMenu::item:selected { background-color: #75736b; color: #333; }
+
+/* === 💬 QToolTip — подсказки === */
+QToolTip { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; padding: 4px; }
+
+/* === 🔢 QSpinBox / QDoubleSpinBox — числовые поля === */
+QSpinBox, QDoubleSpinBox { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; padding: 4px 6px; }
+
+/* === 🧭 QStatusBar — строка состояния === */
+QStatusBar { background-color: #222; color: #FFC107; font-size: 12px; } 
+QStatusBar QLabel { padding-left: 10px; } 
+QStatusBar::item { border: none; }
+
+/* === 🗂️ QTabWidget — вкладки === */
+QTabWidget::pane { border: 1px solid #555; background-color: #333; border-radius: 6px; } 
+QTabBar::tab { background-color: #444; color: #FFC107; padding: 6px 12px; border-top-left-radius: 4px; border-top-right-radius: 4px; } 
+QTabBar::tab:selected { background-color: #75736b; color: #333; } 
+QTabBar::tab:hover { background-color: #555; }
+
+/* === 🖱️ QScrollArea / QScrollBar — прокрутка === */
+QScrollArea { background-color: #333; border: 1px solid #555; border-radius: 4px; } 
+QScrollBar:vertical { background: #333; width: 10px; margin: 2px; border-radius: 4px; } 
+QScrollBar::handle:vertical { background: #555; border-radius: 4px; min-height: 20px; } 
+QScrollBar::handle:vertical:hover { background: #666; } 
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { background: none; border: none; }
+
+/* === ➗ QFrame#line — линии === */
+QFrame#line { background-color: #555; height: 1px; border: none; }
+
+/* === 🔧 QToolButton — кнопки инструментов === */
+QToolButton { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; padding: 6px; } 
+QToolButton:hover { background-color: #555; }
+
+/* === 🪟 QSplitter — разделитель панелей === */
+QSplitter::handle { background: #555; width: 2px; }
+
+/* === 🌈 Пример градиента === */
+QPushButton.gradient { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #555, stop:1 #333); border: 1px solid #777; border-radius: 6px; color: #FFC107; }
+
+/* === 🌠 Радиальный фон для главного окна === */
+QWidget#main { background-color: qradialgradient(cx:0.5, cy:0.5, radius:0.8, fx:0.5, fy:0.5, stop:0 #444, stop:1 #222); }
+"""
+
+# ============================================================
+# 📐 LAYOUT / GEOMETRY / SIZE POLICY — НАСТРОЙКИ РАСПОЛОЖЕНИЯ
+# ============================================================
+
+# --- ОТСТУПЫ ВНУТРИ ЛЕЙАУТА ---
+# layout.setContentsMargins(10, 10, 10, 10)   # отступы: (слева, сверху, справа, снизу)
+# layout.setContentsMargins(0, 0, 0, 0)       # убрать отступы полностью
+
+# --- ПРОМЕЖУТКИ МЕЖДУ ЭЛЕМЕНТАМИ ---
+# layout.setSpacing(10)                       # расстояние между элементами
+
+# --- ВЫРАВНИВАНИЕ ---
+# layout.setAlignment(Qt.AlignTop)            # выравнивание по верхнему краю
+# layout.setAlignment(Qt.AlignCenter)         # по центру
+
+# --- ДОП. ПРОМЕЖУТКИ ---
+# layout.addSpacing(10)                       # фиксированный промежуток
+# layout.addStretch(1)                        # гибкое пространство
+
+# --- QFormLayout ---
+# form.setHorizontalSpacing(20)               # расстояние между меткой и полем
+# form.setVerticalSpacing(15)                 # расстояние между строками
+# form.setLabelAlignment(Qt.AlignRight)       # метки справа
+# form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
+
+# --- QGridLayout ---
+# grid.setContentsMargins(10, 10, 10, 10)
+# grid.setHorizontalSpacing(15)
+# grid.setVerticalSpacing(10)
+
+# --- QVBoxLayout / QHBoxLayout ---
+# vbox.setContentsMargins(8, 8, 8, 8)
+# vbox.setSpacing(10)
+# vbox.addStretch()
+
+# --- SIZE POLICY ---
+# widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+# widget.setMinimumWidth(150)
+# widget.setMaximumHeight(40)
+# widget.setFixedSize(120, 30)
+
+# --- GEOMETRY / POSITION ---
+# widget.setGeometry(50, 50, 200, 40)
+# widget.move(20, 100)
+# widget.resize(300, 100)
+
+# --- ДОПОЛНИТЕЛЬНО ---
+# self.save_button.setFixedWidth(100)
+# self.save_button.setContentsMargins(0, 10, 0, 0)
+# layout.addSpacing(10)
+# form.setVerticalSpacing(15)
+
+# ============================================================
+# ✅ ПРИМЕНЕНИЕ СТИЛЯ
+# ============================================================
+
+# self.setStyleSheet(STYLE)

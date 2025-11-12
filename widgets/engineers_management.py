@@ -250,6 +250,7 @@ class EngineersManagementDialog(QDialog):
         master_combo.setStyleSheet("""
             QLabel { font-size: 12px; color: #FFC107; padding: 0px 0px 2px 5px; }
             QComboBox { background-color: #444; color: #FFC107; height: 20px; border-radius: 4px; padding: 4px; }
+            QComboBox::drop-down { border: none; }
         """)
         form.addRow("Ф.И.О.:", fio_input)
         form.addRow("Мастер:", master_combo)

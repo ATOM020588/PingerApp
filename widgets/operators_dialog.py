@@ -43,7 +43,6 @@ class OperatorsDialog(QDialog):
     def setup_ui(self):
         layout = QVBoxLayout()
         self.setLayout(layout)
-
         button_layout = QHBoxLayout()
         self.configure_groups_button = QPushButton("Настройка групп")
         self.create_operator_button = QPushButton("Создать оператора")
@@ -54,7 +53,7 @@ class OperatorsDialog(QDialog):
         button_layout.addWidget(self.edit_operator_button)
         button_layout.addWidget(self.delete_operator_button)
         layout.addLayout(button_layout)
-
+        layout.setSpacing(10)
         self.operators_table = QTableWidget()
         self.operators_table.setColumnCount(5)
         self.operators_table.setHorizontalHeaderLabels(["Фамилия", "Имя", "Логин", "Отдел/Должность", "Последняя активность"])
@@ -78,8 +77,8 @@ class OperatorsDialog(QDialog):
             QTableWidget::item:hover { background-color: #555; }
             QTableWidget::item:selected { background-color: #75736b; color: #333; }
             QHeaderView::section { background-color: #333333; color: #FFC107; border: 1px solid #555; }
-            QPushButton { background-color: #333; color: #FFC107; border: none; border-radius: 2px; padding: 10px; }
-            QPushButton:hover { background-color: #FFC107; color: #333; }
+            QPushButton { background-color: #444; color: #FFC107; border: none; border: 1px solid #555; border-radius: 4px; padding: 8px 16px; }
+            QPushButton:hover { background-color: #555; }
             QLabel { color: #FFC107; }
         """)
 
@@ -143,7 +142,7 @@ class OperatorsDialog(QDialog):
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Создать оператора" if mode == "create" else "Редактировать оператора")
-        dialog.setFixedSize(600, 400)
+        dialog.setFixedSize(600, 450)
         layout = QVBoxLayout()
         dialog.setLayout(layout)
 
@@ -196,24 +195,25 @@ class OperatorsDialog(QDialog):
         form_layout.addLayout(operator_column)
         form_layout.addLayout(permissions_column)
         layout.addLayout(form_layout)
-
+        layout.addSpacing(20)
         buttons_layout = QHBoxLayout()
         save_button = QPushButton("Сохранить")
+        save_button.setFixedWidth(150)
         cancel_button = QPushButton("Отмена")
+        cancel_button.setFixedWidth(150)
         buttons_layout.addWidget(save_button)
         buttons_layout.addWidget(cancel_button)
         layout.addLayout(buttons_layout)
 
         dialog.setStyleSheet("""
             QDialog { background-color: #333; color: #FFC107; border: 1px solid #FFC107; }
-            QLineEdit { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; padding: 10px; }
-            QComboBox { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; padding: 10px; }
+            QLabel { font-size: 12px; color: #FFC107; padding: 4px 0px 0px 5px; }
+            QLineEdit { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; height: 18px; padding: 6px; }
+            QComboBox { background-color: #444; color: #FFC107; height: 20px; border-radius: 4px; padding: 6px; }
             QComboBox::drop-down { border: none; }
-            QComboBox::down-arrow { image: url(none); width: 10px; height: 10px; }
             QCheckBox { color: #FFC107; }
-            QPushButton { background-color: #333; color: #FFC107; border: none; border-radius: 2px; padding: 10px; }
-            QPushButton:hover { background-color: #FFC107; color: #333; }
-            QLabel { color: #FFC107; }
+            QPushButton { background-color: #444; color: #FFC107; border: none; border: 1px solid #555; border-radius: 4px; padding: 8px 16px; }
+            QPushButton:hover { background-color: #555; }
         """)
 
         if mode == "edit":
@@ -274,21 +274,21 @@ class OperatorsDialog(QDialog):
     def show_group_modal(self):
         dialog = QDialog(self)
         dialog.setWindowTitle("Настройка групп")
-        dialog.setFixedSize(600, 450)
+        dialog.setFixedSize(600, 600)
         layout = QVBoxLayout()
         layout.setSpacing(10)
         dialog.setLayout(layout)
 
         form_layout = QHBoxLayout()
         group_list_column = QVBoxLayout()
-        group_list_column.addWidget(QLabel("Список групп"))
+        group_list_column.addWidget(QLabel("Список групп:"))
         self.group_list = QListWidget()
         for group in self.groups_data:
             self.group_list.addItem(group["name"])
         group_list_column.addWidget(self.group_list)
 
         permissions_column = QVBoxLayout()
-        permissions_column.addWidget(QLabel("Настройка группы"))
+        permissions_column.addWidget(QLabel("Настройки группы:"))
         self.group_name_input = QLineEdit()
         permissions_column.addWidget(QLabel("Название группы:"))
         permissions_column.addWidget(self.group_name_input)
@@ -333,10 +333,10 @@ class OperatorsDialog(QDialog):
             QListWidget { background-color: #444; color: #FFC107; border: 1px solid #555; }
             QListWidget::item:hover { background-color: #555; }
             QListWidget::item:selected { background-color: #75736b; color: #333; }
-            QLineEdit { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; padding: 10px; height: 40px; }
+            QLineEdit { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; padding: 2px; height: 20px; }
             QCheckBox { color: #FFC107; }
-            QPushButton { background-color: #333; color: #FFC107; border: none; border-radius: 2px; padding: 10px; }
-            QPushButton:hover { background-color: #FFC107; color: #333; }
+            QToolButton { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; padding: 6px; } 
+            QToolButton:hover { background-color: #555; }
             QLabel { color: #FFC107; }
         """)
 
