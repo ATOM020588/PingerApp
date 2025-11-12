@@ -26,11 +26,6 @@ class EngineersManagementDialog(QDialog):
     def setup_ui(self):
         layout = QVBoxLayout()
         self.setLayout(layout)
-
-        title = QLabel("Управление сотрудниками СКС")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
-
         columns_layout = QHBoxLayout()
         columns_layout.setSpacing(20)
         layout.addLayout(columns_layout)

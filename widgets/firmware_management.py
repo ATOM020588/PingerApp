@@ -24,14 +24,6 @@ class FirmwareManagementDialog(QDialog):
     def setup_ui(self):
         layout = QVBoxLayout()
         self.setLayout(layout)
-
-        title = QLabel("Управление прошивками")
-        title.setStyleSheet("""
-            QLabel { color: #FFC107; font-size: 14px; }
-            """)
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
-
         columns_layout = QHBoxLayout()
         columns_layout.setSpacing(15)
         layout.addLayout(columns_layout)
