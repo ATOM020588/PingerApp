@@ -644,7 +644,12 @@ class MapCanvas(QGraphicsView):
     # === КОНТЕКСТНОЕ МЕНЮ ===
     def show_context_menu(self, position):
         menu = QMenu(self)
-        menu.setStyleSheet("QMenu { background-color: #333; color: #FFC107; border: 0px solid #FFC107; }")
+        menu.setStyleSheet("""
+        QMenu { background-color: #333; color: #FFC107; border: 1px solid #444; border-radius: 4px; padding: 4px; }
+        QMenu::item { padding: 6px 20px; border-radius: 3px; }
+        QMenu::item:selected { background-color: #555; }
+        QMenu::item:disabled { color: #666; background-color: #333; }
+    """)
         toggle = menu.addAction("Выключить редактирование" if self.is_edit_mode else "Включить редактирование")
         toggle.triggered.connect(self.trigger_parent_edit_button)
 
@@ -652,6 +657,7 @@ class MapCanvas(QGraphicsView):
         add_menu.setEnabled(self.is_edit_mode)
         for text, typ in [("Упр. свитч", "switch"), ("Планируемый свитч", "plan_switch"), ("Клиент", "user"), ("Мыльница", "soap"), ("Таблица", "legend")]:
             action = add_menu.addAction(text)
+            action.setEnabled(self.is_edit_mode)  # ← Новое: отключает каждый пункт
             action.triggered.connect(lambda _, t=typ: self.add_node(t, position) if t != "plan_switch" else self.add_planed_switch(position))
 
         settings = menu.addAction("Параметры карты")

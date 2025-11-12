@@ -211,7 +211,9 @@ class OperatorsDialog(QDialog):
             QLineEdit { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; height: 18px; padding: 6px; }
             QComboBox { background-color: #444; color: #FFC107; height: 20px; border-radius: 4px; padding: 6px; }
             QComboBox::drop-down { border: none; }
-            QCheckBox { color: #FFC107; }
+            QCheckBox { color: #FFC107; border: none; }
+            QCheckBox::indicator { background-color: #444; border: 1px solid #FFC107; width: 14px; height: 14px; }
+            QCheckBox::indicator:checked { background-color: #FFC107; }
             QPushButton { background-color: #444; color: #FFC107; border: none; border: 1px solid #555; border-radius: 4px; padding: 8px 16px; }
             QPushButton:hover { background-color: #555; }
         """)
@@ -334,7 +336,9 @@ class OperatorsDialog(QDialog):
             QListWidget::item:hover { background-color: #555; }
             QListWidget::item:selected { background-color: #75736b; color: #333; }
             QLineEdit { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; padding: 2px; height: 20px; }
-            QCheckBox { color: #FFC107; }
+            QCheckBox { color: #FFC107; border: none; }
+            QCheckBox::indicator { background-color: #444; border: 1px solid #FFC107; width: 14px; height: 14px; }
+            QCheckBox::indicator:checked { background-color: #FFC107; }
             QToolButton { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; padding: 6px; } 
             QToolButton:hover { background-color: #555; }
             QLabel { color: #FFC107; }

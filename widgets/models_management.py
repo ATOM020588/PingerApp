@@ -18,7 +18,7 @@ class ModelsManagementDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Управление моделями")
-        self.setMinimumSize(1350, 900)
+        self.setFixedSize(1350, 900)
 
         # Пути
         self.models_path = os.path.join("models", "models.json")
@@ -104,7 +104,6 @@ class ModelsManagementDialog(QDialog):
         self.mag_ports = QLineEdit()
         self.firmware = QComboBox()
         self.load_firmware_options()
-
         form_layout.addRow(QLabel("Имя:"), self.model_name)
         form_layout.addRow(QLabel("OLT:"), self.olt)
         form_layout.addRow(QLabel("Neobills:"), self.neobills)
@@ -112,20 +111,23 @@ class ModelsManagementDialog(QDialog):
         form_layout.addRow(QLabel("Кол-во портов:"), self.ports_count)
         form_layout.addRow(QLabel("Маг. порты:"), self.mag_ports)
         form_layout.addRow(QLabel("Прошивка:"), self.firmware)
-
+        #form_layout.addWidget(QLabel("Предпросмотр картинки"))
         form_widget.setLayout(form_layout)
         details_column.addWidget(form_widget)
 
-        # Предпросмотр изображения
-        self.preview_image = QLabel()
-        self.preview_image.setFixedSize(300, 300)
-        self.preview_image.setStyleSheet("border-radius: 4px; background-color: #555;")
-        self.preview_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        details_column.addWidget(QLabel("Предпросмотр картинки"))
-        details_column.addWidget(self.preview_image)
+        preview_label = QLabel("Предпросмотр картинки")
+        preview_label.setStyleSheet("padding-top: 20px;")
+        form_layout.addWidget(preview_label)
 
+        # Предпросмотр изображения (поднимаем выше)
+        self.preview_image = QLabel()
+        self.preview_image.setFixedSize(360, 300)
+        self.preview_image.setStyleSheet("border-radius: 4px; border: 1px solid #FFC107; ")
+        self.preview_image.setAlignment(Qt.AlignmentFlag.AlignTop)
+        details_column.addWidget(self.preview_image)
         self.upload_image = QPushButton("Выбрать изображение")
         self.upload_image.clicked.connect(self.upload_image_file)
+        self.upload_image.setStyleSheet("margin-top: 50px;")
         details_column.addWidget(self.upload_image)
 
         # Кнопки
@@ -171,13 +173,13 @@ class ModelsManagementDialog(QDialog):
         syntax_info_layout = QVBoxLayout()
         syntax_info_layout.addWidget(QLabel("Инфо"))
         self.syntax_info_text = QTextEdit()
+        self.syntax_info_text.setMaximumWidth(520)
         self.syntax_info_text.setPlaceholderText("Введите информацию для выбранного типа")
         syntax_info_layout.addWidget(self.syntax_info_text)
         syntax_info.setLayout(syntax_info_layout)
         syntax_info.setFixedWidth(558)
         syntax_layout.addWidget(syntax_info)
-
-        syntax_column.addLayout(syntax_layout)
+        syntax_column.addLayout(syntax_layout, stretch=1)
 
         save_syntax_button = QPushButton("Сохранить изменения")
         save_syntax_button.clicked.connect(self.save_syntax)
@@ -195,34 +197,17 @@ class ModelsManagementDialog(QDialog):
         # === Стили ===
         self.setStyleSheet("""
             QDialog { background-color: #333; color: #FFC107; border: 1px solid #FFC107; }
-            QLabel { color: #FFC107; font-size: 14px; border: none; }
-            QLineEdit, QComboBox, QTextEdit {
-                background-color: #444;
-                color: #FFC107;
-                border-radius: 4px;
-                padding: 8px;
-            }
-            QPushButton {
-                background-color: #444;
-                color: #FFC107;
-                border-radius: 4px;
-                padding: 8px 16px;
-            }
+            QLabel { color: #FFC107; font-size: 12px; border: none; }
+            QLineEdit { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; padding: 2px; height: 20px; }
+            QComboBox { background-color: #444; color: #FFC107; height: 20px; border-radius: 4px; padding: 6px; }
+            QComboBox::drop-down { border: none; }
+            QTextEdit { background-color: #444; color: #FFC107; border-radius: 4px; padding: 8px; border: 1px solid #FFC107; }
+            QPushButton { background-color: #444; color: #FFC107; border: none; border: 1px solid #555; border-radius: 4px; padding: 8px 16px; }
             QPushButton:hover { background-color: #555; }
             QCheckBox { color: #FFC107; border: none; }
-            QCheckBox::indicator {
-                background-color: #444;
-                border: 1px solid #FFC107;
-                width: 16px;
-                height: 16px;
-            }
+            QCheckBox::indicator { background-color: #444; border: 1px solid #FFC107; width: 14px; height: 14px; }
             QCheckBox::indicator:checked { background-color: #FFC107; }
-            QListWidget {
-                background-color: #444;
-                color: #FFC107;
-                border-radius: 4px;
-                padding: 8px;
-            }
+            QListWidget { background-color: #444; color: #FFC107; border: 1px solid #FFC107; border-radius: 4px; padding: 8px; }
             QListWidget::item:hover { background-color: #555; }
             QListWidget::item:selected { background-color: #75736b; color: #333; }
         """)
@@ -293,7 +278,7 @@ class ModelsManagementDialog(QDialog):
             image = model.get("image", "")
             if image and os.path.exists(os.path.join(self.images_dir, image)):
                 pixmap = QPixmap(os.path.join(self.images_dir, image))
-                self.preview_image.setPixmap(pixmap.scaled(300, 300, Qt.AspectRatioMode.KeepAspectRatio))
+                self.preview_image.setPixmap(pixmap.scaled(360, 300, Qt.AspectRatioMode.KeepAspectRatio))
                 self.image_path = os.path.join(self.images_dir, image)
             else:
                 self.preview_image.clear()
@@ -314,7 +299,7 @@ class ModelsManagementDialog(QDialog):
         if file_path:
             self.image_path = file_path
             pixmap = QPixmap(file_path)
-            self.preview_image.setPixmap(pixmap.scaled(300, 300, Qt.AspectRatioMode.KeepAspectRatio))
+            self.preview_image.setPixmap(pixmap.scaled(360, 300, Qt.AspectRatioMode.KeepAspectRatio))
 
     def add_model(self):
         if not self.model_name.text():
