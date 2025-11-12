@@ -356,7 +356,6 @@ class MainWindow(QMainWindow):
         self.update_status_bar()
         self.status_bar.showMessage("Карта успешно сохранена", 3000)
         QTimer.singleShot(3000, self.update_status_bar)
-        self.show_toast(f"Карта '{name}' создана", "success")
 
     def show_open_map_dialog(self):
         dialog = OpenMapDialog(self)

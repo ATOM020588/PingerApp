@@ -644,7 +644,7 @@ class MapCanvas(QGraphicsView):
     # === КОНТЕКСТНОЕ МЕНЮ ===
     def show_context_menu(self, position):
         menu = QMenu(self)
-        menu.setStyleSheet("QMenu { background-color: #333; color: #FFC107; border: 1px solid #FFC107; }")
+        menu.setStyleSheet("QMenu { background-color: #333; color: #FFC107; border: 0px solid #FFC107; }")
         toggle = menu.addAction("Выключить редактирование" if self.is_edit_mode else "Включить редактирование")
         toggle.triggered.connect(self.trigger_parent_edit_button)
 
@@ -662,7 +662,7 @@ class MapCanvas(QGraphicsView):
 
     def show_plan_switch_context_menu(self, position, node):
         menu = QMenu(self)
-        menu.setStyleSheet("QMenu { background-color: #333; color: #FFC107; border: 1px solid #FFC107; }")
+        menu.setStyleSheet("QMenu { background-color: #333; color: #FFC107; border: 0px solid #FFC107; }")
         menu.addAction("Редактировать").triggered.connect(lambda: self.edit_plan_switch(node))
         menu.addAction("Настроить").triggered.connect(lambda: self.show_message("Не реализовано"))
         menu.addAction("Удалить").triggered.connect(lambda: self.delete_plan_switch(node))
