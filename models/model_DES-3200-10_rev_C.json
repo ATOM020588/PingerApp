@@ -13,7 +13,8 @@
     },
     "syntax": {
         "Общие": "main",
-        "Hostname": "hostname"
+        "Hostname": "hostname",
+        "IP": "%IP"
     },
     "image": "model_DES-3200-10_rev_C.jpg"
 }

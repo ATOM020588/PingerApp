@@ -14,30 +14,6 @@ from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt, QTimer
 
 
-class ToastWidget(QWidget):
-    """Всплывающее уведомление (toast) — автономная копия."""
-    def __init__(self, message: str, toast_type: str = "info"):
-        super().__init__()
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-        layout = QHBoxLayout()
-        label = QLabel(message)
-        layout.addWidget(label)
-        self.setLayout(layout)
-        self.setStyleSheet(f"""
-            QWidget {{
-                padding: 10px 20px;
-                border-radius: 4px;
-                color: #181818;
-                font-size: 16px;
-                font-weight: bold;
-                background-color: {'#4CAF50' if toast_type == 'success'
-                                    else '#F44336' if toast_type == 'error'
-                                    else '#808080'};
-            }}
-        """)
-        QTimer.singleShot(3000, self.close)
-
-
 class ModelsManagementDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -257,7 +233,7 @@ class ModelsManagementDialog(QDialog):
     def load_firmware_options(self):
         try:
             if not os.path.exists(self.firmware_path):
-                self.show_toast(f"Файл прошивок не найден: {self.firmware_path}", "error")
+                self.parent().show_toast(f"Файл прошивок не найден: {self.firmware_path}", "error")
                 return
             with open(self.firmware_path, "r", encoding="utf-8") as f:
                 self.firmware_data = json.load(f)
@@ -267,7 +243,7 @@ class ModelsManagementDialog(QDialog):
                 if "model_name" in item:
                     self.firmware.addItem(item["model_name"])
         except Exception as e:
-            self.show_toast(f"Ошибка загрузки прошивок: {str(e)}", "error")
+            self.parent().show_toast(f"Ошибка загрузки прошивок: {str(e)}", "error")
 
     def load_models(self):
         try:
@@ -282,7 +258,7 @@ class ModelsManagementDialog(QDialog):
                 item = self.models_list.addItem(model["model_name"])
                 self.models_list.item(self.models_list.count() - 1).setData(Qt.ItemDataRole.UserRole, model["id"])
         except Exception as e:
-            self.show_toast(f"Ошибка загрузки списка моделей: {str(e)}", "error")
+            self.parent().show_toast(f"Ошибка загрузки списка моделей: {str(e)}", "error")
 
     # --------------------------------------------------------------------- #
     # Обработчики
@@ -292,7 +268,7 @@ class ModelsManagementDialog(QDialog):
         model_path = os.path.join(self.models_dir, f"{self.selected_model_id}.json")
         try:
             if not os.path.exists(model_path):
-                self.show_toast(f"Файл модели не найден: {model_path}", "error")
+                self.parent().show_toast(f"Файл модели не найден: {model_path}", "error")
                 return
             with open(model_path, "r", encoding="utf-8") as f:
                 model = json.load(f)
@@ -323,7 +299,7 @@ class ModelsManagementDialog(QDialog):
                 self.preview_image.clear()
                 self.image_path = None
         except Exception as e:
-            self.show_toast(f"Ошибка загрузки модели: {str(e)}", "error")
+            self.parent().show_toast(f"Ошибка загрузки модели: {str(e)}", "error")
 
     def on_syntax_type_selected(self, item):
         self.selected_syntax_type = item.text()
@@ -342,7 +318,7 @@ class ModelsManagementDialog(QDialog):
 
     def add_model(self):
         if not self.model_name.text():
-            self.show_toast("Заполните имя модели", "error")
+            self.parent().show_toast("Заполните имя модели", "error")
             return
 
         model_id = f"model_{self.model_name.text().replace(' ', '_')}"
@@ -374,7 +350,7 @@ class ModelsManagementDialog(QDialog):
             with open(self.models_path, "r", encoding="utf-8") as f:
                 models = json.load(f)
             if any(m["id"] == model_id for m in models):
-                self.show_toast("Модель с таким именем уже существует", "error")
+                self.parent().show_toast("Модель с таким именем уже существует", "error")
                 return
             models.append({"id": model_id, "model_name": self.model_name.text()})
             with open(self.models_path, "w", encoding="utf-8") as f:
@@ -384,18 +360,18 @@ class ModelsManagementDialog(QDialog):
             with open(os.path.join(self.models_dir, f"{model_id}.json"), "w", encoding="utf-8") as f:
                 json.dump(model_data, f, ensure_ascii=False, indent=4)
 
-            self.show_toast("Модель добавлена", "success")
+            self.parent().show_toast("Модель добавлена", "success")
             self.load_models()
             self.reset_form()
         except Exception as e:
-            self.show_toast(f"Ошибка добавления модели: {str(e)}", "error")
+            self.parent().show_toast(f"Ошибка добавления модели: {str(e)}", "error")
 
     def save_model_changes(self):
         if not self.selected_model_id:
-            self.show_toast("Выберите модель для редактирования", "error")
+            self.parent().show_toast("Выберите модель для редактирования", "error")
             return
         if not self.model_name.text():
-            self.show_toast("Заполните имя модели", "error")
+            self.parent().show_toast("Заполните имя модели", "error")
             return
 
         model_id = self.selected_model_id
@@ -436,15 +412,15 @@ class ModelsManagementDialog(QDialog):
             with open(os.path.join(self.models_dir, f"{model_id}.json"), "w", encoding="utf-8") as f:
                 json.dump(model_data, f, ensure_ascii=False, indent=4)
 
-            self.show_toast("Модель обновлена", "success")
+            self.parent().show_toast("Модель обновлена", "success")
             self.load_models()
             self.reset_form()
         except Exception as e:
-            self.show_toast(f"Ошибка обновления модели: {str(e)}", "error")
+            self.parent().show_toast(f"Ошибка обновления модели: {str(e)}", "error")
 
     def delete_model(self):
         if not self.selected_model_id:
-            self.show_toast("Выберите модель для удаления", "error")
+            self.parent().show_toast("Выберите модель для удаления", "error")
             return
 
         model_path = os.path.join(self.models_dir, f"{self.selected_model_id}.json")
@@ -458,25 +434,25 @@ class ModelsManagementDialog(QDialog):
             if os.path.exists(model_path):
                 os.remove(model_path)
 
-            self.show_toast("Модель удалена", "success")
+            self.parent().show_toast("Модель удалена", "success")
             self.load_models()
             self.reset_form()
         except Exception as e:
-            self.show_toast(f"Ошибка удаления модели: {str(e)}", "error")
+            self.parent().show_toast(f"Ошибка удаления модели: {str(e)}", "error")
 
     def save_syntax(self):
         if not self.selected_syntax_type:
-            self.show_toast("Выберите тип синтаксиса", "error")
+            self.parent().show_toast("Выберите тип синтаксиса", "error")
             return
         if not self.selected_model_id:
-            self.show_toast("Выберите модель для редактирования", "error")
+            self.parent().show_toast("Выберите модель для редактирования", "error")
             return
 
         self.current_syntax_data[self.selected_syntax_type] = self.syntax_info_text.toPlainText()
         model_path = os.path.join(self.models_dir, f"{self.selected_model_id}.json")
         try:
             if not os.path.exists(model_path):
-                self.show_toast(f"Файл модели не найден: {model_path}", "error")
+                self.parent().show_toast(f"Файл модели не найден: {model_path}", "error")
                 return
             with open(model_path, "r", encoding="utf-8") as f:
                 model_data = json.load(f)
@@ -484,12 +460,12 @@ class ModelsManagementDialog(QDialog):
             with open(model_path, "w", encoding="utf-8") as f:
                 json.dump(model_data, f, ensure_ascii=False, indent=4)
 
-            self.show_toast("Синтаксис обновлен", "success")
+            self.parent().show_toast("Синтаксис обновлен", "success")
             self.syntax_info_text.setPlainText("")
             self.syntax_list.clearSelection()
             self.selected_syntax_type = None
         except Exception as e:
-            self.show_toast(f"Ошибка сохранения синтаксиса: {str(e)}", "error")
+            self.parent().show_toast(f"Ошибка сохранения синтаксиса: {str(e)}", "error")
 
     def reset_form(self):
         self.model_name.clear()
@@ -506,12 +482,3 @@ class ModelsManagementDialog(QDialog):
         self.syntax_list.clearSelection()
         self.selected_syntax_type = None
         self.selected_model_id = None
-
-    # --------------------------------------------------------------------- #
-    # Утилита
-    # --------------------------------------------------------------------- #
-    def show_toast(self, message: str, toast_type: str = "info"):
-        toast = ToastWidget(message, toast_type)
-        toast.show()
-        desktop = QApplication.primaryScreen().geometry()
-        toast.move(desktop.width() - toast.width() - 20, desktop.height() - toast.height() - 20)

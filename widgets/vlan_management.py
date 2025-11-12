@@ -11,29 +11,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QApplication
 
-
-class ToastWidget(QWidget):
-    """Всплывающее уведомление (toast) — автономная копия для модуля."""
-    def __init__(self, message, toast_type="info"):
-        super().__init__()
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-        layout = QHBoxLayout()
-        label = QLabel(message)
-        layout.addWidget(label)
-        self.setLayout(layout)
-        self.setStyleSheet(f"""
-            QWidget {{
-                padding: 10px 20px;
-                border-radius: 4px;
-                color: #181818;
-                font-size: 16px;
-                font-weight: bold;
-                background-color: {'#4CAF50' if toast_type == 'success' else '#F44336' if toast_type == 'error' else '#808080'};
-            }}
-        """)
-        QTimer.singleShot(3000, self.close)
-
-
 class VlanManagementDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -191,7 +168,7 @@ class VlanManagementDialog(QDialog):
         self.save_vlan_list()
         self.update_vlan_table()
         self.update_vlan_form(self.vlan_table.item(self.vlan_table.currentRow(), 0))
-        self.show_toast("VLAN добавлен", "success")
+        self.parent().show_toast("VLAN добавлен", "success")
 
     def edit_vlan(self):
         if not self.selected_vlan_id:
@@ -227,7 +204,7 @@ class VlanManagementDialog(QDialog):
             self.save_vlan_list()
             self.update_vlan_table()
             self.update_vlan_form(self.vlan_table.item(self.vlan_table.currentRow(), 0))
-            self.show_toast("VLAN изменён", "success")
+            self.parent().show_toast("VLAN изменён", "success")
         else:
             self.vlan_error_label.setText("Ошибка: VLAN не найден")
             self.show_toast("Ошибка при изменении VLAN", "error")
@@ -244,7 +221,7 @@ class VlanManagementDialog(QDialog):
         self.vlan_gateway_input.clear()
         self.vlan_mask_input.clear()
         self.vlan_error_label.clear()
-        self.show_toast("VLAN удалён", "success")
+        self.parent().show_toast("VLAN удалён", "success")
 
     def save_vlan_list(self):
         vlan_file = "lists/mngmtvlan.json"
@@ -254,10 +231,4 @@ class VlanManagementDialog(QDialog):
                 json.dump(self.vlans, f, ensure_ascii=False, indent=4)
         except Exception as e:
             print(f"Ошибка сохранения VLAN: {str(e)}")
-            self.show_toast(f"Ошибка сохранения VLAN: {str(e)}", "error")
-
-    def show_toast(self, message, toast_type="info"):
-        toast = ToastWidget(message, toast_type)
-        toast.show()
-        desktop = QApplication.primaryScreen().geometry()
-        toast.move(desktop.width() - toast.width() - 20, desktop.height() - toast.height() - 20)
+            self.parent().show_toast(f"Ошибка сохранения VLAN: {str(e)}", "error")

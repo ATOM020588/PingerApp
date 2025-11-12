@@ -156,28 +156,6 @@ from widgets import (
 #   ===Импорт класса MapCanvas===
 from canvas import *
 
-
-
-class ToastWidget(QWidget):
-    def __init__(self, message, toast_type="info"):
-        super().__init__()
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-        layout = QHBoxLayout()
-        label = QLabel(message)
-        layout.addWidget(label)
-        self.setLayout(layout)
-        self.setStyleSheet(f"""
-            QWidget {{
-                padding: 10px 20px;
-                border-radius: 4px;
-                color: #181818;
-                font-size: 16px;
-                font-weight: bold;
-                background-color: {'#4CAF50' if toast_type == 'success' else '#F44336' if toast_type == 'error' else '#808080'};
-            }}
-        """)
-        QTimer.singleShot(3000, self.hide)    
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -227,6 +205,7 @@ class MainWindow(QMainWindow):
 
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
+        self.status_bar = self.statusBar()
         layout = QVBoxLayout()
         main_widget.setLayout(layout)
 
@@ -559,10 +538,7 @@ class MainWindow(QMainWindow):
             }
 
     def show_toast(self, message, toast_type="info"):
-        toast = ToastWidget(message, toast_type)
-        toast.show()
-        desktop = QApplication.primaryScreen().geometry()
-        toast.move(desktop.width() - toast.width() - 20, desktop.height() - toast.height() - 20)
+        self.status_bar.showMessage(message, 3000)  # 3000 мс = 3 секунды, игнорируем toast_type (без цветов)
 
     def show_operators_dialog(self):
         dialog = OperatorsDialog(self)

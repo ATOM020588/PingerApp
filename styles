@@ -1,0 +1,40 @@
+            QLabel { font-size: 12px; color: #FFC107; padding: 0px 0px 0px 5px; }
+            QComboBox { background-color: #444; color: #FFC107; height: 20px; border-radius: 4px; padding: 4px; }
+
+
+
+                    QLabel { font-size: 12px; color: #FFC107; padding: 2px 0px 0px 5px; }
+            QLineEdit { height: 18px; padding: 4px 5px; }
+
+
+
+            # === ВОССТАНОВЛЕННЫЕ СТИЛИ ===
+        self.setStyleSheet("""
+            QDialog { background-color: #333; color: #FFC107; border: 1px solid #FFC107; }
+            QLabel { color: #FFC107; font-size: 14px; }
+            QListWidget { 
+                background-color: #444; 
+                color: #FFC107; 
+                border: 1px solid #FFC107; 
+                border-radius: 4px; 
+                padding: 8px;
+            }
+            QListWidget::item:hover { background-color: #555; }
+            QListWidget::item:selected { background-color: #75736b; color: #333; }
+            QPushButton { 
+                background-color: #444; 
+                color: #FFC107; 
+                border: none; 
+                border: 1px solid #555; 
+                border-radius: 4px; 
+                padding: 8px 16px;
+            }
+            QPushButton:hover { background-color: #555; }
+            QLineEdit {
+                background-color: #444;
+                color: #FFC107;
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 8px;
+            }
+        """)

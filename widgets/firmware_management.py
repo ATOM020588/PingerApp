@@ -9,29 +9,6 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer
 
-
-class ToastWidget(QWidget):
-    """Всплывающее уведомление (toast) — автономная копия для модуля."""
-    def __init__(self, message, toast_type="info"):
-        super().__init__()
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-        layout = QHBoxLayout()
-        label = QLabel(message)
-        layout.addWidget(label)
-        self.setLayout(layout)
-        self.setStyleSheet(f"""
-            QWidget {{
-                padding: 10px 20px;
-                border-radius: 4px;
-                color: #181818;
-                font-size: 16px;
-                font-weight: bold;
-                background-color: {'#4CAF50' if toast_type == 'success' else '#F44336' if toast_type == 'error' else '#808080'};
-            }}
-        """)
-        QTimer.singleShot(3000, self.close)
-
-
 class FirmwareManagementDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -130,7 +107,7 @@ class FirmwareManagementDialog(QDialog):
                 self.firmwares = []
         except json.JSONDecodeError as e:
             print(f"Ошибка формата JSON в {firmware_file}: {str(e)}")
-            self.show_toast(f"Ошибка формата JSON в файле прошивок: {str(e)}", "error")
+            self.parent().show_toast(f"Ошибка формата JSON в файле прошивок: {str(e)}", "error")
             self.firmwares = []
 
     def update_firmware_text(self, item):
@@ -146,7 +123,7 @@ class FirmwareManagementDialog(QDialog):
 
     def save_firmware(self):
         if not self.selected_model_id:
-            self.show_toast("Выберите модель для сохранения прошивки", "error")
+            self.parent().show_toast("Выберите модель для сохранения прошивки", "error")
             return
 
         firmware_text = self.firmware_text.toPlainText().strip()
@@ -180,9 +157,3 @@ class FirmwareManagementDialog(QDialog):
         except Exception as e:
             print(f"Ошибка сохранения прошивок: {str(e)}")
             self.show_toast(f"Ошибка сохранения прошивок: {str(e)}", "error")
-
-    def show_toast(self, message, toast_type="info"):
-        toast = ToastWidget(message, toast_type)
-        toast.show()
-        desktop = QApplication.primaryScreen().geometry()
-        toast.move(desktop.width() - toast.width() - 20, desktop.height() - toast.height() - 20)

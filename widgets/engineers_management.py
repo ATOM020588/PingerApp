@@ -11,28 +11,6 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer
 
-
-class ToastWidget(QWidget):
-    def __init__(self, message, toast_type="info"):
-        super().__init__()
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-        layout = QHBoxLayout()
-        label = QLabel(message)
-        layout.addWidget(label)
-        self.setLayout(layout)
-        self.setStyleSheet(f"""
-            QWidget {{
-                padding: 10px 20px;
-                border-radius: 4px;
-                color: #181818;
-                font-size: 16px;
-                font-weight: bold;
-                background-color: {'#4CAF50' if toast_type == 'success' else '#F44336' if toast_type == 'error' else '#808080'};
-            }}
-        """)
-        QTimer.singleShot(3000, self.close)
-
-
 class EngineersManagementDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -61,6 +39,7 @@ class EngineersManagementDialog(QDialog):
         master_column = QVBoxLayout()
         master_label = QLabel("Мастер участка")
         master_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        master_label.setStyleSheet("font-size: 12px;")
         master_column.addWidget(master_label)
         self.master_list = QListWidget()
         self.master_list.setMinimumHeight(400)
@@ -80,6 +59,7 @@ class EngineersManagementDialog(QDialog):
         engineer_column = QVBoxLayout()
         engineer_label = QLabel("Техники")
         engineer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        engineer_label.setStyleSheet("font-size: 12px;")
         engineer_column.addWidget(engineer_label)
         self.engineer_list = QListWidget()
         self.engineer_list.setMinimumHeight(400)
@@ -94,10 +74,6 @@ class EngineersManagementDialog(QDialog):
         engineer_column.addLayout(engineer_buttons)
         columns_layout.addLayout(engineer_column, stretch=1)
 
-        # Кнопка "Настройка групп" — работает!
-        groups_button = QPushButton("Настройка групп")
-        groups_button.clicked.connect(self.show_group_settings)
-        layout.addWidget(groups_button)
 
         # Подключение
         self.add_master_button.clicked.connect(self.add_master)
@@ -114,7 +90,7 @@ class EngineersManagementDialog(QDialog):
             QListWidget { 
                 background-color: #444; 
                 color: #FFC107; 
-                border: 1px solid #555; 
+                border: 1px solid #FFC107; 
                 border-radius: 4px; 
                 padding: 8px;
             }
@@ -124,6 +100,7 @@ class EngineersManagementDialog(QDialog):
                 background-color: #444; 
                 color: #FFC107; 
                 border: none; 
+                border: 1px solid #555; 
                 border-radius: 4px; 
                 padding: 8px 16px;
             }
@@ -136,20 +113,6 @@ class EngineersManagementDialog(QDialog):
                 padding: 8px;
             }
         """)
-
-    def show_group_settings(self):
-        """Открывает окно настройки групп (заглушка с возможностью расширения)"""
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Настройка групп")
-        dialog.setFixedSize(500, 400)
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel("Настройка групп сотрудников СКС"))
-        layout.addWidget(QLabel("Пока в разработке..."))
-        close_btn = QPushButton("Закрыть")
-        close_btn.clicked.connect(dialog.accept)
-        layout.addWidget(close_btn)
-        dialog.setLayout(layout)
-        dialog.exec()
 
     def load_masters(self):
         file = "lists/masters.json"
@@ -216,7 +179,7 @@ class EngineersManagementDialog(QDialog):
         form.addRow("Ф.И.О.:", input_field)
         layout.addLayout(form)
         error = QLabel()
-        error.setStyleSheet("color: #FFC107;")
+        error.setStyleSheet("color: #FFC107; ")
         layout.addWidget(error)
         buttons = QHBoxLayout()
         save = QPushButton("ОК")
@@ -225,6 +188,10 @@ class EngineersManagementDialog(QDialog):
         buttons.addWidget(cancel)
         layout.addLayout(buttons)
         dialog.setLayout(layout)
+        dialog.setStyleSheet("""
+            QLabel { font-size: 12px; color: #FFC107; padding: 2px 0px 0px 5px; }
+            QLineEdit { height: 18px; padding: 4px 5px; }
+        """)
 
         def save_master():
             name = input_field.text().strip()
@@ -239,7 +206,7 @@ class EngineersManagementDialog(QDialog):
             self.save_masters()
             self.load_masters()
             dialog.accept()
-            self.show_toast(f"Мастер {'добавлен' if mode == 'add' else 'обновлён'}", "success")
+            self.parent().show_toast(f"Мастер {'добавлен' if mode == 'add' else 'обновлён'}", "success")
 
         save.clicked.connect(save_master)
         cancel.clicked.connect(dialog.reject)
@@ -252,7 +219,7 @@ class EngineersManagementDialog(QDialog):
             return
         master = next(m for m in self.masters if m["fio"] == item.text())
         if any(e.get("master_id") == master["id"] for e in self.engineers):
-            self.show_toast("Нельзя удалить мастера с техниками", "error")
+            self.parent().show_toast("Нельзя удалить мастера с техниками", "error")
             return
         self.masters = [m for m in self.masters if m["id"] != master["id"]]
         self.save_masters()
@@ -265,7 +232,7 @@ class EngineersManagementDialog(QDialog):
     def edit_engineer(self):
         item = self.engineer_list.currentItem()
         if not item:
-            self.show_toast("Выберите техника", "error")
+            self.parent().show_toast("Выберите техника", "error")
             return
         self._edit_engineer_dialog("edit", item.text())
 
@@ -275,10 +242,15 @@ class EngineersManagementDialog(QDialog):
         dialog.setFixedSize(300, 200)
         layout = QVBoxLayout()
         form = QFormLayout()
+        form.setVerticalSpacing(20)
         fio_input = QLineEdit(fio or "")
         master_combo = QComboBox()
         for m in self.masters:
             master_combo.addItem(m["fio"], m["id"])
+        master_combo.setStyleSheet("""
+            QLabel { font-size: 12px; color: #FFC107; padding: 0px 0px 2px 5px; }
+            QComboBox { background-color: #444; color: #FFC107; height: 20px; border-radius: 4px; padding: 4px; }
+        """)
         form.addRow("Ф.И.О.:", fio_input)
         form.addRow("Мастер:", master_combo)
         layout.addLayout(form)
@@ -292,6 +264,10 @@ class EngineersManagementDialog(QDialog):
         buttons.addWidget(cancel)
         layout.addLayout(buttons)
         dialog.setLayout(layout)
+        dialog.setStyleSheet("""
+            QLabel { font-size: 12px; color: #FFC107; padding: 4px 0px 0px 5px; }
+            QLineEdit { height: 18px; padding: 4px 5px; }
+        """)
 
         def save_engineer():
             name = fio_input.text().strip()
@@ -308,7 +284,7 @@ class EngineersManagementDialog(QDialog):
             self.save_engineers()
             self.update_engineer_list()
             dialog.accept()
-            self.show_toast(f"Техник {'добавлен' if mode == 'add' else 'обновлён'}", "success")
+            self.parent().show_toast(f"Техник {'добавлен' if mode == 'add' else 'обновлён'}", "success")
 
         save.clicked.connect(save_engineer)
         cancel.clicked.connect(dialog.reject)
@@ -336,9 +312,3 @@ class EngineersManagementDialog(QDialog):
         os.makedirs(os.path.dirname(file), exist_ok=True)
         with open(file, "w", encoding="utf-8") as f:
             json.dump(self.engineers, f, ensure_ascii=False, indent=4)
-
-    def show_toast(self, message, toast_type="info"):
-        toast = ToastWidget(message, toast_type)
-        toast.show()
-        desktop = QApplication.primaryScreen().geometry()
-        toast.move(desktop.width() - toast.width() - 20, desktop.height() - toast.height() - 20)
