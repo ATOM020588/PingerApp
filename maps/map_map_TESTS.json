@@ -4,7 +4,7 @@
         "folder": "main",
         "age": "3",
         "last_adm": "unknown",
-        "mod_time": "2025-11-12 14:48:35",
+        "mod_time": "2025-11-12 15:25:35",
         "def_vlan": "-1",
         "width": "1900",
         "height": "1000",
@@ -752,7 +752,7 @@
             "model": "DES-3200-28 rev C",
             "other": "",
             "creator": "Овчинников Сергей 03.10.2025",
-            "note": ""
+            "note": "Примечание"
         },
         {
             "id": "1",

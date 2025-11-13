@@ -36,9 +36,9 @@ class MapNameDialog(QDialog):
         self.setLayout(layout)
         self.setStyleSheet("""
             QDialog { background-color: #333; color: #FFC107; border: 1px solid #FFC107; }
-            QLineEdit { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; padding: 10px; }
-            QPushButton { background-color: #333; color: #FFC107; border: none; border-radius: 2px; padding: 10px; }
-            QPushButton:hover { background-color: #FFC107; color: #333; }
+            QLineEdit { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; height: 18px; padding: 4px 5px; }
+            QPushButton { background-color: #444; color: #FFC107; border: none; border: 1px solid #555; border-radius: 4px; padding: 8px 16px; }
+            QPushButton:hover { background-color: #555; }
             QLabel { color: #FFC107; }
         """)
 
@@ -78,8 +78,8 @@ class OpenMapDialog(QDialog):
             QTableWidget::item:hover { background-color: #555; }
             QTableWidget::item:selected { background-color: #75736b; color: #333; }
             QHeaderView::section { background-color: #333333; color: #FFC107; border: 1px solid #555; }
-            QPushButton { background-color: #333; color: #FFC107; border: none; border-radius: 2px; padding: 10px; }
-            QPushButton:hover { background-color: #FFC107; color: #333; }
+            QPushButton { background-color: #444; color: #FFC107; border: none; border: 1px solid #555; border-radius: 4px; padding: 8px 16px; }
+            QPushButton:hover { background-color: #555; }
             QLabel { color: #FFC107; }
         """)
 
@@ -224,7 +224,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(button_layout)
         for btn in [ping_button, self.settings_button, self.edit_button]:
             btn.setStyleSheet("""
-                QPushButton { background-color: #333; color: #FFC107; font-size: 12px; border: none; border-radius: 2px; padding: 10px; }
+                QPushButton { background-color: #333; color: #FFC107; font-size: 12px; border: none; border-radius: 2px; padding: 5px; }
                 QPushButton:hover { background-color: #FFC107; color: #333; }
                 QPushButton:pressed { background-color: #FFC107; color: #333; }
                 QPushButton:disabled { background-color: #555; color: #888; }
@@ -238,7 +238,7 @@ class MainWindow(QMainWindow):
         self.tabs.setStyleSheet("""
             QTabWidget::pane { background-color: #333; border: 1px solid #555; }
             QTabBar { alignment: left; }
-            QTabBar::tab { background-color: #333; color: #FFC107; padding: 8px 10px; border: 1px solid #555; border-bottom: none; border-top-left-radius: 4px; border-top-right-radius: 4px; margin-right: 2px; }
+            QTabBar::tab { background-color: #333; color: #FFC107; padding: 8px 10px; border: 1px solid #555; border-bottom: none; border-top-left-radius: 4px; border-top-right-radius: 4px; margin-right: 2px; height: }
             QTabBar::tab:selected { background-color: #FFC107; color: #333; }
             QTabBar::tab:hover:!selected { background-color: #444; }
             QTabBar::close-button { background-color: transparent; width: 16px; height: 16px; margin: 2px; padding: 2px; }

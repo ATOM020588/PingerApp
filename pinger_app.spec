@@ -5,7 +5,7 @@ a = Analysis(
     ['pinger_app.py'],
     pathex=[],
     binaries=[],
-    datas=[('canvas', 'canvas'), ('icons', 'icons'), ('images', 'images'), ('lists', 'lists'), ('models', 'models'), ('operators', 'operators')],
+    datas=[('canvas', 'canvas'), ('icons', 'icons'), ('images', 'images'), ('lists', 'lists'), ('models', 'models'), ('operators', 'operators'), ('widgets', 'widgets')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

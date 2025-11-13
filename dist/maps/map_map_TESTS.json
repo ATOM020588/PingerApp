@@ -4,7 +4,7 @@
         "folder": "main",
         "age": "3",
         "last_adm": "unknown",
-        "mod_time": "2025-10-24 17:34:25",
+        "mod_time": "2025-11-12 15:53:13",
         "def_vlan": "-1",
         "width": "1795",
         "height": "1000",
@@ -574,8 +574,8 @@
             "name": "TEST_SWITCH_ELTEX",
             "copyid": "none",
             "xy": {
-                "x": 1037.0,
-                "y": 282.0
+                "x": 1046.0,
+                "y": 289.0
             },
             "ip": "192.168.0.2",
             "mac": "AB:CD:EF:DH:IJ:",
@@ -744,8 +744,8 @@
         {
             "id": "{BC6A2748-9FF3-4277-9C36-4C704E5E6919}",
             "xy": {
-                "x": 1047.0,
-                "y": 170.0
+                "x": 1056.0,
+                "y": 177.0
             },
             "name": "SWITCH_PLANNED",
             "model": "DES-3200-28 rev C",

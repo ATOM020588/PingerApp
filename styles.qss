@@ -120,19 +120,22 @@ QWidget#main { background-color: qradialgradient(cx:0.5, cy:0.5, radius:0.8, fx:
 # --- ПРОМЕЖУТКИ МЕЖДУ ЭЛЕМЕНТАМИ ---
 # layout.setSpacing(10)                       # расстояние между элементами
 
-# --- ВЫРАВНИВАНИЕ ---
-# layout.setAlignment(Qt.AlignTop)            # выравнивание по верхнему краю
-# layout.setAlignment(Qt.AlignCenter)         # по центру
+# --- ВЫРАВНИВАНИЕ (PyQt6 — через AlignmentFlag) ---
+# layout.setAlignment(Qt.AlignmentFlag.AlignTop)             # по верхнему краю
+# layout.setAlignment(Qt.AlignmentFlag.AlignCenter)          # по центру
+# layout.setAlignment(Qt.AlignmentFlag.AlignBottom)          # по нижнему краю
+# layout.setAlignment(Qt.AlignmentFlag.AlignLeft)            # по левому краю
+# layout.setAlignment(Qt.AlignmentFlag.AlignRight)           # по правому краю
 
 # --- ДОП. ПРОМЕЖУТКИ ---
 # layout.addSpacing(10)                       # фиксированный промежуток
-# layout.addStretch(1)                        # гибкое пространство
+# layout.addStretch(1)                        # гибкое пространство, "растягивает" пустое место
 
 # --- QFormLayout ---
 # form.setHorizontalSpacing(20)               # расстояние между меткой и полем
 # form.setVerticalSpacing(15)                 # расстояние между строками
-# form.setLabelAlignment(Qt.AlignRight)       # метки справа
-# form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
+# form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)    # метки справа
+# form.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
 
 # --- QGridLayout ---
 # grid.setContentsMargins(10, 10, 10, 10)
@@ -145,7 +148,7 @@ QWidget#main { background-color: qradialgradient(cx:0.5, cy:0.5, radius:0.8, fx:
 # vbox.addStretch()
 
 # --- SIZE POLICY ---
-# widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+# widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 # widget.setMinimumWidth(150)
 # widget.setMaximumHeight(40)
 # widget.setFixedSize(120, 30)
