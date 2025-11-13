@@ -151,7 +151,7 @@ class OpenMapDialog(QDialog):
         self.table.setRowCount(len(self.map_files))
         for row, map_file in enumerate(self.map_files):
             map_name = map_file.replace(".json", "").replace("map_", "")
-            for col, value in enumerate([map_name, "Неизвестно", "Загружается с сервера"]):
+            for col, value in enumerate([map_name, "lasteditor", "lastpingdatetime"]):
                 item = QTableWidgetItem(value)
                 item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
                 self.table.setItem(row, col, item)
@@ -525,7 +525,7 @@ class MainWindow(QMainWindow):
                 font-size: 12px; 
                 border: none; 
                 border-radius: 2px; 
-                padding: 10px; 
+                padding: 5px; 
             }
             QPushButton:hover { background-color: #FFCA28; color: #333; }
             QPushButton:pressed { background-color: #FFCA28; color: #333; }
@@ -536,7 +536,7 @@ class MainWindow(QMainWindow):
                 font-size: 12px; 
                 border: none; 
                 border-radius: 2px; 
-                padding: 10px; 
+                padding: 5px; 
             }
             QPushButton:hover { background-color: #FFC107; color: #333; }
             QPushButton:pressed { background-color: #FFC107; color: #333; }

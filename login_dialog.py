@@ -97,7 +97,7 @@ class LoginDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Вход в систему")
-        self.setFixedSize(400, 500)
+        self.setFixedSize(350, 500)
         self.setStyleSheet("background-color: #333; color: #FFC107;")
         
         self.ws_client = WebSocketLoginClient()
@@ -124,14 +124,14 @@ class LoginDialog(QDialog):
             logo_label.setPixmap(pixmap)
         else:
             logo_label.setText("LOGO")
-            logo_label.setStyleSheet("font-size: 48px; font-weight: bold;")
+            logo_label.setStyleSheet("font-size: 28px; font-weight: bold;")
         logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(logo_label)
 
         # === ЗАГОЛОВОК ===
         title = QLabel("Network Management System")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("font-size: 20px; font-weight: bold; margin: 10px;")
+        title.setStyleSheet("font-size: 15px; font-weight: bold; margin: 10px;")
         layout.addWidget(title)
 
         # === ПОЛЯ ВВОДА ===
@@ -155,7 +155,7 @@ class LoginDialog(QDialog):
 
         # === КНОПКА ВХОДА ===
         self.login_button = QPushButton("Войти")
-        self.login_button.setFixedWidth(300)
+        #self.login_button.setFixedWidth(300)
         self.login_button.setStyleSheet(self.button_style())
         self.login_button.clicked.connect(self.attempt_login)
         self.login_button.setEnabled(False)
@@ -163,8 +163,8 @@ class LoginDialog(QDialog):
 
         # === STATUSBAR ===
         self.status_bar = QStatusBar()
-        self.status_bar.setFixedSize(300,40)
-        self.status_bar.setStyleSheet("color: #FFC107; background-color: #444; border: none;")
+        self.status_bar.setFixedHeight(30)
+        self.status_bar.setStyleSheet("color: #FFC107; background-color: #444; border: 1px solid #555; border-radius: 4px; ")
         layout.addWidget(self.status_bar)
 
         # === ТАЙМЕР ОБНОВЛЕНИЯ СТАТУСА ===
@@ -194,20 +194,20 @@ class LoginDialog(QDialog):
 
     def update_status(self):
         if self.is_connected:
-            self.status_bar.showMessage("Сервер: активен", 3000)
+            self.status_bar.showMessage("Сервер: активен", 6000)
         else:
-            self.status_bar.showMessage("Ожидание подключения к серверу...", 3000)
+            self.status_bar.showMessage("Ожидание подключения к серверу...", 6000)
 
     def attempt_login(self):
         if not self.is_connected:
-            self.status_bar.showMessage("Нет связи с сервером", 5000)
+            self.status_bar.showMessage("Нет связи с сервером", 6000)
             return
 
         login = self.login_input.text().strip()
         password = self.password_input.text()
 
         if not login or not password:
-            self.status_bar.showMessage("Заполните все поля", 3000)
+            self.status_bar.showMessage("Заполните все поля", 6000)
             return
 
         password_hash = hashlib.sha256(password.encode()).hexdigest()
@@ -224,12 +224,12 @@ class LoginDialog(QDialog):
         self.login_button.setEnabled(self.is_connected)
 
         if response.get("success"):
-            self.status_bar.showMessage("Вход успешен", 3000)
+            self.status_bar.showMessage("Вход успешен", 6000)
             QTimer.singleShot(500, lambda: self.login_successful.emit(response.get("user", {})))
             self.accept()
         else:
             error = response.get("error", "Неизвестная ошибка")
-            self.status_bar.showMessage(f"Ошибка: {error}", 5000)
+            self.status_bar.showMessage(f"Ошибка: {error}", 6000)
             self.password_input.clear()
 
     def closeEvent(self, event):
