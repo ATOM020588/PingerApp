@@ -1,5 +1,7 @@
 # widgets/operators_dialog.py
 
+import asyncio
+import websockets
 import os
 import json
 from datetime import datetime
@@ -83,42 +85,39 @@ class OperatorsDialog(QDialog):
         """)
 
     def load_operators(self):
-        users_path = "operators/users.json"
-        os.makedirs(os.path.dirname(users_path), exist_ok=True)
+        asyncio.run(self.fetch_operators_from_server())
+
+    async def fetch_operators_from_server(self):
+        uri = "ws://127.0.0.1:8081"  # адрес сервера
         try:
-            if os.path.exists(users_path):
-                with open(users_path, "r", encoding="utf-8") as f:
-                    self.users_data = json.load(f)
-                self.operators_table.setRowCount(len(self.users_data))
-                for row, op in enumerate(self.users_data):
-                    for col, value in enumerate([
-                        op.get("surname", ""),
-                        op.get("name", ""),
-                        op.get("login", ""),
-                        op.get("department", ""),
-                        op.get("last_activity", "Нет данных")
-                    ]):
-                        item = QTableWidgetItem(value)
-                        item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
-                        self.operators_table.setItem(row, col, item)
-            else:
-                self.users_data = []
-                self.operators_table.setRowCount(1)
-                item = QTableWidgetItem("Список операторов пуст")
+            async with websockets.connect(uri) as ws:
+                request = {"action": "list_operators"}
+                await ws.send(json.dumps(request))
+                response = await ws.recv()
+                data = json.loads(response)
+
+                if data.get("success"):
+                    self.users_data = data.get("operators", [])
+                    self.populate_table()
+                else:
+                    self.show_toast(f"Ошибка: {data.get('error', 'Неизвестная ошибка')}", "error")
+        except Exception as e:
+            self.show_toast(f"Ошибка подключения к серверу: {e}", "error")
+            
+            
+    def populate_table(self):
+        self.operators_table.setRowCount(len(self.users_data))
+        for row, op in enumerate(self.users_data):
+            for col, value in enumerate([
+                op.get("surname", ""),
+                op.get("name", ""),
+                op.get("login", ""),
+                op.get("department", ""),
+                op.get("last_activity", "Нет данных")
+            ]):
+                item = QTableWidgetItem(value)
                 item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.operators_table.setItem(0, 0, item)
-                self.operators_table.setSpan(0, 0, 1, 5)
-        except json.JSONDecodeError as e:
-            print(f"Ошибка формата JSON в {users_path}: {str(e)}")
-            self.show_toast(f"Ошибка формата JSON в файле операторов: {str(e)}", "error")
-            self.users_data = []
-            self.operators_table.setRowCount(1)
-            item = QTableWidgetItem("Ошибка загрузки операторов")
-            item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
-            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.operators_table.setItem(0, 0, item)
-            self.operators_table.setSpan(0, 0, 1, 5)
+                self.operators_table.setItem(row, col, item)
 
     def load_groups(self):
         groups_path = "operators/groups.json"

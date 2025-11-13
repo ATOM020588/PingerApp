@@ -263,15 +263,15 @@ class MapCanvas(QGraphicsView):
                 if not port or port == "0":
                     continue
                 dx = self.get_node_xy(other, nodes_by_id[link["endid"] if pkey == "startport" else link["startid"]][1])[0] - self.get_node_xy(node, nodes_by_id[link["startid"] if pkey == "startport" else link["endid"]][1])[0]
-                dy = self.get_node_xy(other, ...)[1] - self.get_node_xy(node, ...)[1]
+                dy = self.get_node_xy(other, nodes_by_id[link["endid"] if pkey == "startport" else link["startid"]][1])[1] - self.get_node_xy(node, nodes_by_id[link["startid"] if pkey == "startport" else link["endid"]][1])[1]
                 length = math.hypot(dx, dy)
                 dist = float(link.get(fkey, 10))
                 if length > 0:
                     dx, dy = dx / length, dy / length
-                    px = self.get_node_xy(node, ...)[0] + dx * dist
-                    py = self.get_node_xy(node, ...)[1] + dy * dist
+                    px = self.get_node_xy(node, nodes_by_id[link["startid"] if pkey == "startport" else link["endid"]][1])[0] + dx * dist
+                    py = self.get_node_xy(node, nodes_by_id[link["startid"] if pkey == "startport" else link["endid"]][1])[1] + dy * dist
                 else:
-                    px, py = self.get_node_xy(node, ...)[0] + dist, self.get_node_xy(node, ...)[1]
+                    px, py = self.get_node_xy(node, nodes_by_id[link["startid"] if pkey == "startport" else link["endid"]][1])[0] + dist, self.get_node_xy(node, nodes_by_id[link["startid"] if pkey == "startport" else link["endid"]][1])[1]
 
                 port_text = self.scene.addText(str(port))
                 port_text.setDefaultTextColor(QColor(link.get(ckey, "#000080")))
@@ -307,8 +307,8 @@ class MapCanvas(QGraphicsView):
                         else:
                             self.selected_nodes.append(tup)
                         self.update_selection_graphics()
-                    return  # ← Только return
-                return  # ← Только return
+                    return
+                return
 
             # === ОДИНОЧНОЕ ИЛИ ГРУППОВОЕ ПЕРЕМЕЩЕНИЕ ===
             if self.is_edit_mode:
@@ -327,7 +327,7 @@ class MapCanvas(QGraphicsView):
                             for n in self.selected_nodes
                         ]
                         self.update_selection_graphics()
-                        return  # ← Только return
+                        return
 
                 # 2. Одиночное — только если весь объект в клике
                 if result:
@@ -343,14 +343,14 @@ class MapCanvas(QGraphicsView):
                             if (node, ntype, key) not in self.selected_nodes:
                                 self.selected_nodes = [(node, ntype, key)]
                             self.update_selection_graphics()
-                            return  # ← Только return
+                            return
 
             # Рамка — только в пустоту
             if not result:
                 self.selection_start = scene_pos
                 self.selected_nodes = []
                 self.clear_selection_graphics()
-                return  # ← Только return
+                return
 
         # === ПКМ паннинг ===
         elif event.button() == Qt.MouseButton.RightButton:
@@ -358,7 +358,7 @@ class MapCanvas(QGraphicsView):
             self._last_pos = event.position().toPoint()
             self._context_menu_pos = event.position().toPoint()
             self._moved_during_rmb = False
-            return  # ← Только return
+            return
 
         super().mousePressEvent(event)
 
@@ -483,7 +483,6 @@ class MapCanvas(QGraphicsView):
         ]:
             for item in items:
                 item_rect = self.get_node_rect(item, ntype)
-                # ← ТОЛЬКО ПОЛНОЕ ВЛОЖЕНИЕ
                 if rect.contains(item_rect):
                     self.selected_nodes.append((item, ntype, key))
         self.update_selection_graphics()
@@ -494,7 +493,7 @@ class MapCanvas(QGraphicsView):
             return
         padding = 2
         pen = QPen(QColor("#FFC107"), 1, Qt.PenStyle.DashLine)
-        pen.setDashPattern([2, 2])  # ← Пунктир здесь
+        pen.setDashPattern([2, 2])
         for node, ntype, _ in self.selected_nodes:
             r = self.get_node_rect(node, ntype).adjusted(-padding, -padding, padding, padding)
             border = self.scene.addRect(r, pen=pen)
@@ -565,9 +564,8 @@ class MapCanvas(QGraphicsView):
 
     # === СОХРАНЕНИЕ ===
     def save_map_to_file(self):
-        if hasattr(self.parent, "current_map_file") and self.parent.current_map_file:
-            with open(self.parent.current_map_file, 'w', encoding='utf-8') as f:
-                json.dump(self.map_data, f, ensure_ascii=False, indent=2)
+        if hasattr(self.parent, "save_map"):
+            self.parent.save_map()
 
     def show_status_saved(self):
         if hasattr(self.parent, "status_bar"):
@@ -657,7 +655,7 @@ class MapCanvas(QGraphicsView):
         add_menu.setEnabled(self.is_edit_mode)
         for text, typ in [("Упр. свитч", "switch"), ("Планируемый свитч", "plan_switch"), ("Клиент", "user"), ("Мыльница", "soap"), ("Таблица", "legend")]:
             action = add_menu.addAction(text)
-            action.setEnabled(self.is_edit_mode)  # ← Новое: отключает каждый пункт
+            action.setEnabled(self.is_edit_mode)
             action.triggered.connect(lambda _, t=typ: self.add_node(t, position) if t != "plan_switch" else self.add_planed_switch(position))
 
         settings = menu.addAction("Параметры карты")

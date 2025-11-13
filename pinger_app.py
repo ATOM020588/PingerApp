@@ -7,10 +7,73 @@ from PyQt6.QtWidgets import (QGraphicsPixmapItem, QMessageBox)
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QMenuBar, QMenu, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QGraphicsView, QGraphicsScene, QDialog, QLineEdit)
 from PyQt6.QtWidgets import (QPushButton, QLabel, QTableWidget, QTableWidgetItem, QFormLayout, QSpinBox, QHeaderView, QComboBox, QListWidget, QCheckBox, QTextEdit, QFileDialog)
 from PyQt6.QtGui import QAction, QColor, QBrush, QPen, QPainter, QPixmap, QIcon
-from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF
+from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF, QThread, pyqtSignal
 import pickle
 import re
 from datetime import datetime
+import asyncio
+import websockets
+import uuid
+from websockets.protocol import State 
+
+# === WebSocket Client ===
+class WebSocketClient(QThread):
+    connected = pyqtSignal(bool)
+    message_received = pyqtSignal(dict)
+    
+    def __init__(self, uri="ws://127.0.0.1:8081"):
+        super().__init__()
+        self.uri = uri
+        self.websocket = None
+        self.loop = None
+        self.running = True
+        self.pending_requests = {}
+        
+    def run(self):
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_until_complete(self._main())
+        
+    async def _main(self):
+        while self.running:
+            try:
+                async with websockets.connect(self.uri, ping_interval=20, ping_timeout=10) as ws:
+                    self.websocket = ws
+                    self.connected.emit(True)
+                    
+                    while self.running and ws.state == State.OPEN:
+                        await asyncio.sleep(1)
+                        try:
+                            response = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                            data = json.loads(response)
+                            self.message_received.emit(data)
+                        except asyncio.TimeoutError:
+                            continue
+                        except Exception as e:
+                            print(f"[WS] Error receiving: {e}")
+                            break
+                            
+            except Exception as e:
+                print(f"[WS] Connection error: {e}")
+                self.connected.emit(False)
+                if self.running:
+                    await asyncio.sleep(2)
+            finally:
+                self.websocket = None
+                self.connected.emit(False)
+                
+    def send_request(self, action, **kwargs):
+        if self.websocket and self.isRunning():
+            request_id = str(uuid.uuid4())
+            request = {"action": action, "request_id": request_id, **kwargs}
+            asyncio.run_coroutine_threadsafe(
+                self.websocket.send(json.dumps(request)), self.loop
+            )
+            return request_id
+        return None
+        
+    def stop(self):
+        self.running = False
 
 class MapNameDialog(QDialog):
     def __init__(self, parent=None):
@@ -43,10 +106,11 @@ class MapNameDialog(QDialog):
         """)
 
 class OpenMapDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, map_files=None):
         super().__init__(parent)
         self.setWindowTitle("Открыть карту")
         self.setFixedSize(785, 400)
+        self.map_files = map_files or []
         layout = QVBoxLayout()
         self.table = QTableWidget()
         self.table.setColumnCount(3)
@@ -84,27 +148,13 @@ class OpenMapDialog(QDialog):
         """)
 
     def populate_table(self):
-        maps_dir = "maps"
-        if not os.path.exists(maps_dir):
-            os.makedirs(maps_dir)
-        map_files = [f for f in os.listdir(maps_dir) if f.endswith(".json")]
-        self.table.setRowCount(len(map_files))
-        for row, map_file in enumerate(map_files):
-            try:
-                with open(os.path.join(maps_dir, map_file), "r", encoding="utf-8") as f:
-                    map_data = json.load(f)
-                map_name = map_data.get("map", {}).get("name", map_file[:-5] if not map_file.startswith("map_") else map_file[4:-5])
-                mod_time = map_data.get("map", {}).get("mod_time", "Неизвестно")
-                last_editor = map_data.get("map", {}).get("last_adm", "Неизвестно")
-                for col, value in enumerate([map_name, mod_time, f"Последний редактор: {last_editor}"]):
-                    item = QTableWidgetItem(value)
-                    item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
-                    self.table.setItem(row, col, item)
-            except Exception as e:
-                for col, value in enumerate([map_file[:-5], "Ошибка", f"Ошибка загрузки: {str(e)}"]):
-                    item = QTableWidgetItem(value)
-                    item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
-                    self.table.setItem(row, col, item)
+        self.table.setRowCount(len(self.map_files))
+        for row, map_file in enumerate(self.map_files):
+            map_name = map_file.replace(".json", "").replace("map_", "")
+            for col, value in enumerate([map_name, "Неизвестно", "Загружается с сервера"]):
+                item = QTableWidgetItem(value)
+                item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
+                self.table.setItem(row, col, item)
 
 class MapSettingsDialog(QDialog):
     def __init__(self, parent=None, map_data=None):
@@ -165,6 +215,15 @@ class MainWindow(QMainWindow):
         self.map_data = {}
         self.is_edit_mode = False
         self.setWindowTitle("PINGER")
+        
+        # WebSocket client
+        self.ws_client = WebSocketClient()
+        self.ws_client.connected.connect(self.on_ws_connected)
+        self.ws_client.message_received.connect(self.on_ws_message)
+        self.ws_client.start()
+        self.ws_connected = False
+        self.pending_requests = {}
+        
         self.setStyleSheet("""
             QMainWindow { background-color: #333; }
             QMenuBar { background-color: #333; color: #FFC107; border-bottom: 3px solid #FFC107; padding: 5px 0px 5px 0px; min-height: 15px; }
@@ -238,16 +297,13 @@ class MainWindow(QMainWindow):
         self.tabs.setStyleSheet("""
             QTabWidget::pane { background-color: #333; border: 1px solid #555; }
             QTabBar { alignment: left; }
-            QTabBar::tab { background-color: #333; color: #FFC107; padding: 8px 10px; border: 1px solid #555; border-bottom: none; border-top-left-radius: 4px; border-top-right-radius: 4px; margin-right: 2px; height: }
+            QTabBar::tab { background-color: #333; color: #FFC107; padding: 8px 10px; border: 1px solid #555; border-bottom: none; border-top-left-radius: 4px; border-top-right-radius: 4px; margin-right: 2px; }
             QTabBar::tab:selected { background-color: #FFC107; color: #333; }
             QTabBar::tab:hover:!selected { background-color: #444; }
             QTabBar::close-button { background-color: transparent; width: 16px; height: 16px; margin: 2px; padding: 2px; }
-            QTabBar::close-button:selected { image: url(C:/PingerApp/icons/closetab_act.png); }
-            QTabBar::close-button:!selected { image: url(C:/PingerApp/icons/closetab_inact.png); }
         """)
 
         self.setGeometry(100, 100, 1200, 900)
-        
         
         self.status_bar = self.statusBar()
         self.status_bar.setFixedHeight(20)
@@ -258,6 +314,19 @@ class MainWindow(QMainWindow):
 
         self.load_open_maps()
 
+    def on_ws_connected(self, connected):
+        self.ws_connected = connected
+        if connected:
+            self.status_bar.showMessage("Подключено к серверу", 3000)
+        else:
+            self.status_bar.showMessage("Нет связи с сервером", 3000)
+            
+    def on_ws_message(self, data):
+        request_id = data.get("request_id")
+        if request_id in self.pending_requests:
+            callback = self.pending_requests.pop(request_id)
+            callback(data)
+
     def update_status_bar(self):
         if self.active_map_id:
             map_info = self.map_data.get(self.active_map_id, {}).get("map", {})
@@ -266,7 +335,6 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"Последние изменения: {last_adm} в {mod_time}")
         else:
             self.status_bar.clearMessage()
-    
     
     def load_open_maps(self):
         try:
@@ -337,15 +405,31 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(3000, self.update_status_bar)
 
     def show_open_map_dialog(self):
-        dialog = OpenMapDialog(self)
-        dialog.setModal(False)
-        dialog.accepted.connect(lambda: self.on_open_map_accepted(dialog))
-        dialog.show()
+        if not self.ws_connected:
+            self.show_toast("Нет связи с сервером", "error")
+            return
+            
+        # Request list of maps from server
+        request_id = self.ws_client.send_request("list_maps")
+        
+        def on_list_response(data):
+            if data.get("success"):
+                map_files = data.get("files", [])
+                dialog = OpenMapDialog(self, map_files)
+                dialog.setModal(False)
+                dialog.accepted.connect(lambda: self.on_open_map_accepted(dialog, map_files))
+                dialog.show()
+            else:
+                self.show_toast(f"Ошибка загрузки списка карт: {data.get('error')}", "error")
+                
+        self.pending_requests[request_id] = on_list_response
 
-    def on_open_map_accepted(self, dialog):
+    def on_open_map_accepted(self, dialog, map_files):
         if dialog.table.currentRow() >= 0:
-            map_name = dialog.table.item(dialog.table.currentRow(), 0).text()
+            selected_file = map_files[dialog.table.currentRow()]
+            map_name = selected_file.replace(".json", "").replace("map_", "")
             map_id = map_name
+            
             if map_id not in [m["id"] for m in self.open_maps]:
                 self.open_maps.append({"id": map_id, "name": map_id})
                 self.active_map_id = map_id
@@ -363,16 +447,31 @@ class MainWindow(QMainWindow):
         if not self.active_map_id:
             self.show_toast("Нет активной карты для сохранения", "info")
             return
+            
+        if not self.ws_connected:
+            self.show_toast("Нет связи с сервером", "error")
+            return
+            
         try:
-            maps_dir = "maps"
-            if not os.path.exists(maps_dir):
-                os.makedirs(maps_dir)
-            map_file = os.path.join(maps_dir, f"map_{self.active_map_id}.json")
             self.map_data[self.active_map_id]["map"]["mod_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            with open(map_file, "w", encoding="utf-8") as f:
-                json.dump(self.map_data[self.active_map_id], f, ensure_ascii=False, indent=4)
-            self.status_bar.showMessage("Карта успешно сохранена", 3000)
-            QTimer.singleShot(3000, self.update_status_bar)
+            
+            # Send to server
+            request_id = self.ws_client.send_request(
+                "file_put",
+                path=f"maps/map_{self.active_map_id}.json",
+                data=self.map_data[self.active_map_id]
+            )
+            
+            def on_save_response(data):
+                if data.get("success"):
+                    self.status_bar.showMessage("Карта успешно сохранена", 3000)
+                    QTimer.singleShot(3000, self.update_status_bar)
+                else:
+                    self.status_bar.showMessage(f"Ошибка сохранения: {data.get('error')}", 3000)
+                    QTimer.singleShot(3000, self.update_status_bar)
+                    
+            self.pending_requests[request_id] = on_save_response
+            
         except Exception as e:
             self.status_bar.showMessage("Ошибка сохранения карты", 3000)
             QTimer.singleShot(3000, self.update_status_bar)
@@ -452,8 +551,8 @@ class MainWindow(QMainWindow):
             self.save_map()
             
     def sync_edit_mode(self, is_edit_mode):
-            self.is_edit_mode = is_edit_mode
-            self.edit_button.setStyleSheet("""
+        self.is_edit_mode = is_edit_mode
+        self.edit_button.setStyleSheet("""
             QPushButton { 
                 background-color: #FFC107; 
                 color: #333; 
@@ -476,14 +575,14 @@ class MainWindow(QMainWindow):
             QPushButton:hover { background-color: #FFC107; color: #333; }
             QPushButton:pressed { background-color: #FFC107; color: #333; }
         """)
-            self.settings_button.setEnabled(self.is_edit_mode and bool(self.active_map_id))
-            self.show_toast(f"Режим редактирования: {'включен' if self.is_edit_mode else 'выключен'}", "info")
-            for index in range(self.tabs.count()):
-                        tab = self.tabs.widget(index)
-                        tab.is_edit_mode = self.is_edit_mode
-                        tab.render_map()
-            if not self.is_edit_mode:
-                        self.save_map()
+        self.settings_button.setEnabled(self.is_edit_mode and bool(self.active_map_id))
+        self.show_toast(f"Режим редактирования: {'включен' if self.is_edit_mode else 'выключен'}", "info")
+        for index in range(self.tabs.count()):
+            tab = self.tabs.widget(index)
+            tab.is_edit_mode = self.is_edit_mode
+            tab.render_map()
+        if not self.is_edit_mode:
+            self.save_map()
 
     def close_tab(self, index):
         map_id = self.open_maps[index]["id"]
@@ -502,43 +601,46 @@ class MainWindow(QMainWindow):
 
     def open_map(self, map_id):
         self.active_map_id = map_id
-        map_file = os.path.join("maps", f"map_{map_id}.json")
-        try:
-            if os.path.exists(map_file):
-                with open(map_file, "r", encoding="utf-8") as f:
-                    loaded_data = json.load(f)
-                self.map_data[map_id] = loaded_data
-            else:
-                alt_map_file = os.path.join("maps", f"{map_id}.json")
-                if os.path.exists(alt_map_file):
-                    with open(alt_map_file, "r", encoding="utf-8") as f:
-                        loaded_data = json.load(f)
-                    self.map_data[map_id] = loaded_data
-                else:
-                    self.map_data[map_id] = {
-                        "map": {"name": map_id, "width": "1200", "height": "800"},
-                        "switches": [{"id": "sw1", "xy": {"x": 200, "y": 200}, "name": "Switch1", "ip": "192.168.1.1", "pingok": True}],
-                        "plan_switches": [],
-                        "users": [],
-                        "soaps": [],
-                        "legends": [],
-                        "magistrals": []
-                    }
-                    self.show_toast(f"Карта '{map_id}' не найдена, создана новая карта", "info")
-        except json.JSONDecodeError as e:
-            self.show_toast(f"Ошибка формата JSON в карте '{map_id}': {str(e)}", "error")
+        
+        if not self.ws_connected:
+            # Fallback to empty map
             self.map_data[map_id] = {
                 "map": {"name": map_id, "width": "1200", "height": "800"},
-                "switches": [{"id": "sw1", "xy": {"x": 200, "y": 200}, "name": "Switch1", "ip": "192.168.1.1", "pingok": True}],
+                "switches": [],
                 "plan_switches": [],
                 "users": [],
                 "soaps": [],
                 "legends": [],
                 "magistrals": []
             }
+            return
+            
+        # Request from server
+        request_id = self.ws_client.send_request(
+            "file_get",
+            path=f"maps/map_{map_id}.json"
+        )
+        
+        def on_load_response(data):
+            if data.get("success"):
+                self.map_data[map_id] = data.get("data")
+                self.update_tabs()
+            else:
+                self.map_data[map_id] = {
+                    "map": {"name": map_id, "width": "1200", "height": "800"},
+                    "switches": [],
+                    "plan_switches": [],
+                    "users": [],
+                    "soaps": [],
+                    "legends": [],
+                    "magistrals": []
+                }
+                self.show_toast(f"Карта '{map_id}' не найдена на сервере, создана новая", "info")
+                
+        self.pending_requests[request_id] = on_load_response
 
     def show_toast(self, message, toast_type="info"):
-        self.status_bar.showMessage(message, 3000)  # 3000 мс = 3 секунды, игнорируем toast_type (без цветов)
+        self.status_bar.showMessage(message, 3000)
 
     def show_operators_dialog(self):
         dialog = OperatorsDialog(self)
@@ -559,16 +661,23 @@ class MainWindow(QMainWindow):
     def show_models_management_dialog(self):
         dialog = ModelsManagementDialog(self)
         dialog.exec()
-        
-        
-    
 
 def main():
     app = QApplication(sys.argv)
-    window = MainWindow()
-    window.showMaximized()
-    window.show()
-    sys.exit(app.exec())
+    
+    # Показать диалог логина
+    from login_dialog import LoginDialog
+    login_dialog = LoginDialog()
+    
+    if login_dialog.exec() == QDialog.DialogCode.Accepted:
+        # Логин успешен, показываем главное окно
+        window = MainWindow()
+        window.showMaximized()
+        window.show()
+        sys.exit(app.exec())
+    else:
+        # Логин отменен
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()
