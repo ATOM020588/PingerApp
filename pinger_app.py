@@ -3,11 +3,13 @@ import json
 import os
 import math
 import shutil
+import base64
+import os
 from PyQt6.QtWidgets import (QGraphicsPixmapItem, QMessageBox)
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QMenuBar, QMenu, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QGraphicsView, QGraphicsScene, QDialog, QLineEdit)
 from PyQt6.QtWidgets import (QPushButton, QLabel, QTableWidget, QTableWidgetItem, QFormLayout, QSpinBox, QHeaderView, QComboBox, QListWidget, QCheckBox, QTextEdit, QFileDialog)
 from PyQt6.QtGui import QAction, QColor, QBrush, QPen, QPainter, QPixmap, QIcon
-from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF, QThread, pyqtSignal, QSettings
 import pickle
 import re
 from datetime import datetime
@@ -211,11 +213,35 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowIcon(QIcon("icon.ico"))
         self.open_maps = []
+        
+        self.settings = QSettings("Network Management System", "UserSession")
+
+        # Восстановление открытых карт
+        saved_maps = self.settings.value("open_maps", [], type=list)
+        if saved_maps:
+            self.open_maps = saved_maps
+            self.active_map_id = self.settings.value("active_map_id", None)
+            if not self.active_map_id and self.open_maps:
+                self.active_map_id = self.open_maps[0]["id"]
+        else:
+            self.open_maps = []
+            self.active_map_id = None
+
+        # Автологин
+        saved_login = self.settings.value("saved_login", "")
+        saved_hash = self.settings.value("saved_password_hash", "")
+        if saved_login and saved_hash:
+            self.auto_login(saved_login, saved_hash)
+        
         self.active_map_id = None
         self.map_data = {}
         self.is_edit_mode = False
-        self.setWindowTitle("PINGER")
+        self.setWindowTitle("Network Management System")
         
+        # Умная синхронизация pingok каждые 12 секунд
+        self.ping_sync_timer = QTimer(self)
+        self.ping_sync_timer.timeout.connect(self.check_ping_updates)
+        self.ping_sync_timer.start(12000)  # 12 секунд — оптимально
         # WebSocket client
         self.ws_client = WebSocketClient()
         self.ws_client.connected.connect(self.on_ws_connected)
@@ -297,10 +323,12 @@ class MainWindow(QMainWindow):
         self.tabs.setStyleSheet("""
             QTabWidget::pane { background-color: #333; border: 1px solid #555; }
             QTabBar { alignment: left; }
-            QTabBar::tab { background-color: #333; color: #FFC107; padding: 8px 10px; border: 1px solid #555; border-bottom: none; border-top-left-radius: 4px; border-top-right-radius: 4px; margin-right: 2px; }
+            QTabBar::tab { background-color: #333; color: #FFC107; padding: 8px 10px; border: 1px solid #555; border-bottom: none; border-top-left-radius: 4px; border-top-right-radius: 4px; margin-right: 2px; height: }
             QTabBar::tab:selected { background-color: #FFC107; color: #333; }
             QTabBar::tab:hover:!selected { background-color: #444; }
             QTabBar::close-button { background-color: transparent; width: 16px; height: 16px; margin: 2px; padding: 2px; }
+            QTabBar::close-button:selected { image: url(C:/PingerApp_to_serv/icons/closetab_act.png); }
+            QTabBar::close-button:!selected { image: url(C:/PingerApp_to_serv/icons/closetab_inact.png); }
         """)
 
         self.setGeometry(100, 100, 1200, 900)
@@ -327,6 +355,27 @@ class MainWindow(QMainWindow):
             callback = self.pending_requests.pop(request_id)
             callback(data)
 
+    def auto_login(self, login, password_hash):
+        """Попытка автоматического входа"""
+        if not self.ws_connected:
+            QTimer.singleShot(1000, lambda: self.auto_login(login, password_hash))
+            return
+
+        request_id = self.ws_client.send_request("auth_login", login=login, password_hash=password_hash)
+
+        def on_auto_login_response(data):
+            if data.get("success"):
+                self.status_bar.showMessage(f"Автовход: {login}", 3000)
+                # Ничего не делаем — main() уже ждёт успешного логина
+            else:
+                self.status_bar.showMessage("Автовход не удался — введите пароль", 5000)
+                self.settings.remove("saved_login")
+                self.settings.remove("saved_password_hash")
+
+        if request_id:
+            self.pending_requests[request_id] = on_auto_login_response
+    
+    
     def update_status_bar(self):
         if self.active_map_id:
             map_info = self.map_data.get(self.active_map_id, {}).get("map", {})
@@ -335,6 +384,58 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"Последние изменения: {last_adm} в {mod_time}")
         else:
             self.status_bar.clearMessage()
+    
+    
+    def get_current_ping_hashes(self):
+        """Возвращает словарь {индекс: хеш(pingok)} для текущей карты"""
+        if not self.active_map_id:
+            return {}
+        switches = self.map_data.get(self.active_map_id, {}).get("switches", [])
+        return {str(i): str(s.get("pingok", False)).lower() for i, s in enumerate(switches)}
+
+    def check_ping_updates(self):
+        """Спрашивает сервер: не изменились ли pingok?"""
+        if not self.ws_connected or not self.active_map_id:
+            return
+
+        current_hashes = self.get_current_ping_hashes()
+
+        request_id = self.ws_client.send_request(
+            "check_ping_updates",
+            map_id=self.active_map_id,
+            hashes=current_hashes
+        )
+
+        if not request_id:
+            return
+
+        def on_updates_response(data):
+            if not data.get("success"):
+                return
+
+            updates = data.get("updates", [])
+            if not updates:
+                return  # ничего не изменилось
+
+            switches = self.map_data[self.active_map_id]["switches"]
+            updated = False
+
+            for upd in updates:
+                idx = upd["index"]
+                if idx < len(switches):
+                    old = switches[idx].get("pingok")
+                    new = upd["pingok"]
+                    if old != new:
+                        switches[idx]["pingok"] = new
+                        updated = True
+
+            if updated:
+                current_tab = self.tabs.currentWidget()
+                if current_tab:
+                    current_tab.render_map()
+                self.status_bar.showMessage(f"Обновлено статусов: {len(updates)}", 2000)
+
+        self.pending_requests[request_id] = on_updates_response
     
     def load_open_maps(self):
         try:
@@ -352,10 +453,16 @@ class MainWindow(QMainWindow):
 
     def save_open_maps(self):
         try:
-            with open("open_maps.pkl", "wb") as f:
-                pickle.dump(self.open_maps, f)
+            # Сохраняем только id и имя
+            clean_maps = [
+                {"id": m["id"], "name": m["name"]} 
+                for m in self.open_maps
+            ]
+            self.settings.setValue("open_maps", clean_maps)
+            self.settings.setValue("active_map_id", self.active_map_id)
+            self.settings.sync()
         except Exception as e:
-            self.show_toast(f"Ошибка сохранения открытых карт: {str(e)}", "error")
+            print(f"Ошибка сохранения сессии: {e}")
 
     def update_tabs(self):
         self.tabs.blockSignals(True)
@@ -506,15 +613,66 @@ class MainWindow(QMainWindow):
             self.show_toast("Ошибка: активная карта не найдена", "error")
 
     def ping_switches(self):
-        if not self.active_map_id or not self.map_data.get(self.active_map_id, {}).get("switches"):
-            self.show_toast("Нет устройств для пинга", "error")
+        if not self.active_map_id:
+            self.show_toast("Нет активной карты", "error")
             return
-        for switch_device in self.map_data[self.active_map_id]["switches"]:
-            switch_device["pingok"] = bool(switch_device.get("ip"))
-        self.update_tabs()
-        self.update_status_bar()
-        self.status_bar.showMessage("Пинг устройств завершен", 3000)
-        QTimer.singleShot(3000, self.update_status_bar)
+
+        if not self.ws_connected:
+            self.show_toast("Нет связи с сервером", "error")
+            return
+
+        switches = self.map_data[self.active_map_id]["switches"]
+        if not switches:
+            self.show_toast("На карте нет устройств", "error")
+            return
+
+        # Подготавливаем данные: индекс + IP (индекс нужен для надёжного маппинга)
+        ping_data = [
+            {"index": idx, "ip": s.get("ip")}
+            for idx, s in enumerate(switches)
+            if s.get("ip") and isinstance(s.get("ip"), str) and s["ip"].strip()
+        ]
+
+        if not ping_data:
+            self.show_toast("Нет устройств с IP-адресами", "error")
+            return
+
+        # Отправляем запрос серверу
+        request_id = self.ws_client.send_request(
+            "ping_switches",
+            ping_data=ping_data,
+            timeout_ms=3000  # можно взять из CONFIG клиента, если добавите
+        )
+
+        if not request_id:
+            self.show_toast("Не удалось отправить запрос", "error")
+            return
+
+        def on_ping_response(data):
+            if not data.get("success"):
+                self.show_toast(f"Ошибка пинга: {data.get('error', 'unknown')}", "error")
+                return
+
+            results = data.get("results", [])
+            result_map = {r["index"]: r["success"] for r in results}
+
+            # Обновляем pingok в локальных данных
+            for idx in result_map:
+                if idx < len(switches):
+                    switches[idx]["pingok"] = result_map[idx]
+
+            # Перерисовываем только текущую карту (не пересоздаём все табы)
+            current_tab = self.tabs.currentWidget()
+            if current_tab:
+                current_tab.render_map()
+
+            self.update_status_bar()
+            self.status_bar.showMessage("Пинг устройств завершён", 3000)
+            QTimer.singleShot(3000, self.update_status_bar)
+
+        self.pending_requests[request_id] = on_ping_response
+
+        self.status_bar.showMessage("Пинг устройств в процессе...", 5000)
 
     def toggle_edit_mode(self):
         self.is_edit_mode = not self.is_edit_mode
@@ -661,6 +819,7 @@ class MainWindow(QMainWindow):
     def show_models_management_dialog(self):
         dialog = ModelsManagementDialog(self)
         dialog.exec()
+        
 
 def main():
     app = QApplication(sys.argv)

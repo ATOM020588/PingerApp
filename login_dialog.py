@@ -4,10 +4,10 @@ import os
 import json
 import hashlib
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QCheckBox,
     QPushButton, QStatusBar, QWidget, QApplication
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, QSettings
 from PyQt6.QtGui import QPixmap
 import asyncio
 import websockets
@@ -152,6 +152,20 @@ class LoginDialog(QDialog):
         form_layout.addWidget(QLabel("Password:"))
         form_layout.addWidget(self.password_input)
         layout.addLayout(form_layout)
+        
+        # === ЧЕКБОКС "Запомнить меня" ===
+        self.remember_checkbox = QCheckBox("Запомнить меня")
+        self.remember_checkbox.setChecked(True)  # по умолчанию включён
+
+        # КРАСИВЫЙ ЖЁЛТЫЙ ЧЕКБОКС
+        self.remember_checkbox.setStyleSheet("""
+            QCheckBox { color: #FFC107; font-size: 12px; spacing: 8px; padding: 4px; }
+            QCheckBox::indicator { width: 12px; height: 12px; border-radius: 4px; border: 2px solid #555; background-color: #333; }
+            QCheckBox::indicator:checked { background-color: #FFC107; border: 2px solid #FFC107; }
+            QCheckBox::indicator:checked:hover { background-color: #FFB300; border: 2px solid #FFB300; }
+            QCheckBox::indicator:hover { border: 2px solid #FFC107; }
+        """)
+        form_layout.addWidget(self.remember_checkbox)
 
         # === КНОПКА ВХОДА ===
         self.login_button = QPushButton("Войти")
@@ -219,18 +233,43 @@ class LoginDialog(QDialog):
         self.ws_client.send_login(login, password_hash)
 
     def on_login_response(self, response):
+        # Включаем поля обратно в любом случае
         self.login_input.setEnabled(True)
         self.password_input.setEnabled(True)
         self.login_button.setEnabled(self.is_connected)
 
+        # ------------------------------------------------------------
+        # 1. Сохраняем логин/пароль ДО того, как очистим поле пароля!
+        # ------------------------------------------------------------
+        current_login = self.login_input.text().strip()
+        current_password = self.password_input.text()          # ещё не очищен
+        password_hash = hashlib.sha256(current_password.encode()).hexdigest()
+
         if response.get("success"):
+            # ---------- УСПЕШНЫЙ ВХОД ----------
             self.status_bar.showMessage("Вход успешен", 6000)
-            QTimer.singleShot(500, lambda: self.login_successful.emit(response.get("user", {})))
-            self.accept()
+
+            # Сохраняем только если стоит галочка «Запомнить меня»
+            if hasattr(self, "remember_checkbox") and self.remember_checkbox.isChecked():
+                settings = QSettings("PINGER", "UserSession")
+                settings.setValue("saved_login", current_login)
+                settings.setValue("saved_password_hash", password_hash)
+                settings.sync()
+
+            # Передаём данные пользователя в MainWindow
+            user_data = response.get("user", {})
+            user_data["login"] = current_login   # гарантируем наличие логина
+            QTimer.singleShot(300, lambda: self.login_successful.emit(user_data))
+            self.accept()                        # закрываем диалог
+
         else:
+            # ---------- НЕУДАЧНЫЙ ВХОД ----------
             error = response.get("error", "Неизвестная ошибка")
             self.status_bar.showMessage(f"Ошибка: {error}", 6000)
+
+            # Очищаем только поле пароля
             self.password_input.clear()
+            self.password_input.setFocus()
 
     def closeEvent(self, event):
         self.ws_client.running = False

@@ -134,24 +134,39 @@ class MapCanvas(QGraphicsView):
                 x, y = self.get_node_xy(node, node_type)
                 items = []
 
-                # Иконка
-                image_path = overlay_path = None
+                # ——— ОПРЕДЕЛЕНИЕ ИКОНКИ И ОВЕРЛЕЯ ———
+                image_path = None
+                overlay_path = None
+
                 if node_type == "switch":
-                    if node.get("notinstalled") == "-1":
+                    image_path = "canvas/Router.png"
+                    overlay_path = None
+
+                    # 1. ПИНГ — САМЫЙ ВЫСОКИЙ ПРИОРИТЕТ
+                    if str(node.get("pingok", "")).lower() in ("false", "0", "", "none"):
+                        image_path = "canvas/Router_off.png"
+                        overlay_path = "canvas/other/ping_failed.png"  # опционально
+
+                    # 2. Не установлен
+                    elif node.get("notinstalled") == "-1":
                         image_path = "canvas/Router_off.png"
                         overlay_path = "canvas/other/not_install.png"
+
+                    # 3. Установлен, но не настроен
                     elif node.get("notsettings") == "-1":
                         image_path = "canvas/Router.png"
                         overlay_path = "canvas/other/not_settings.png"
-                    else:
-                        image_path = "canvas/Router.png"
+
                 elif node_type == "plan_switch":
                     image_path = "canvas/Router_plan.png"
-                elif node_type == "user":
-                    image_path = "canvas/Computer.png"
-                elif node_type == "soap":
-                    image_path = "canvas/Switch.png"
 
+                elif node_type == "user":
+                    image_path = "canvas/Computer.png"          # ВЕРНУЛИ ИКОНКУ!
+
+                elif node_type == "soap":
+                    image_path = "canvas/Switch.png"            # ВЕРНУЛИ ИКОНКУ!
+
+                # ——— РИСОВАНИЕ ОСНОВНОЙ ИКОНКИ ———
                 w = h = 0
                 if image_path and os.path.exists(image_path):
                     pixmap = QPixmap(image_path)
@@ -161,12 +176,18 @@ class MapCanvas(QGraphicsView):
                     pixmap_item.setZValue(2)
                     items.append(pixmap_item)
                 else:
-                    color = {"switch": "#555", "plan_switch": "#888", "user": "#00f", "soap": "#0f0"}.get(node_type, "#555")
-                    rect_item = self.scene.addRect(x-7.5, y-6.5, 15, 13, brush=QBrush(QColor(color)))
+                    # Запасной вариант — цветной квадратик (если иконка пропала)
+                    color = {
+                        "switch": "#00aa00", "plan_switch": "#888888",
+                        "user": "#0088ff", "soap": "#ff8800"
+                    }.get(node_type, "#555555")
+                    rect_item = self.scene.addRect(x-25, y-25, 50, 50,
+                        brush=QBrush(QColor(color)), pen=QPen(QColor("#000")))
                     rect_item.setZValue(2)
                     items.append(rect_item)
-                    w, h = 15, 13
+                    w, h = 50, 50
 
+                # ——— ОВЕРЛЕЙ (если есть) ———
                 if overlay_path and os.path.exists(overlay_path):
                     overlay = QPixmap(overlay_path)
                     overlay_item = self.scene.addPixmap(overlay)
@@ -174,14 +195,17 @@ class MapCanvas(QGraphicsView):
                     overlay_item.setZValue(3)
                     items.append(overlay_item)
 
-                text = node.get("name") or node.get("text") or f"{node_type.capitalize()} {node_id}"
+                # ——— ПОДПИСЬ ———
+                text = node.get("name") or node.get("text") or ""
+                if not text:
+                    text = {"switch": "Свитч", "plan_switch": "План", "user": "Клиент", "soap": "Мыльница"}.get(node_type, node_type)
                 text_item = self.scene.addText(text)
                 text_item.setDefaultTextColor(QColor("#dbdbdb"))
                 font = text_item.font()
                 font.setPixelSize(12)
                 font.setBold(True)
                 text_item.setFont(font)
-                text_item.setPos(x - text_item.boundingRect().width()/2, y + h/2 + 15)
+                text_item.setPos(x - text_item.boundingRect().width()/2, y + h/2 + 5)
                 text_item.setZValue(4)
                 items.append(text_item)
 
