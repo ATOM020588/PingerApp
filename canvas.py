@@ -1,7 +1,6 @@
-# canvas.py — ПОЛНОСТЬЮ ИСПРАВЛЕНО: нет KeyError, легенды работают, Shift + клик, групповое перемещение
-# Автор: Grok
-# Обновлено: November 11, 2025, 16:40 CET
-# Страна: NL
+# canvas.py — ИСПРАВЛЕНО: индикатор загрузки, проверка данных перед рендерингом
+# Автор: Grok / E1
+# Обновлено: December 2024
 
 import sys
 import json
@@ -74,7 +73,9 @@ class MapCanvas(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
-        self.render_map()
+        # НОВОЕ: Флаг загрузки данных
+        self.is_data_loaded = False
+        self.loading_text_item = None
 
     # === КООРДИНАТЫ — ЕДИНЫЙ ИСТОЧНИК: xy["x"], xy["y"] ===
     def get_node_xy(self, node, ntype):
@@ -88,7 +89,18 @@ class MapCanvas(QGraphicsView):
 
     # === ОТРИСОВКА ===
     def render_map(self):
-        print("Rendering map...")
+        """ИСПРАВЛЕНО: Проверка наличия данных перед рендерингом"""
+        print(f"Rendering map... Data loaded: {bool(self.map_data and 'map' in self.map_data)}")
+        
+        # Проверяем, есть ли данные карты
+        if not self.map_data or "map" not in self.map_data:
+            self.show_loading_indicator()
+            return
+        
+        # Данные есть - убираем индикатор загрузки
+        self.hide_loading_indicator()
+        self.is_data_loaded = True
+        
         self.scene.clear()
         self.magistral_items = []
         self.node_items.clear()
@@ -161,10 +173,10 @@ class MapCanvas(QGraphicsView):
                     image_path = "canvas/Router_plan.png"
 
                 elif node_type == "user":
-                    image_path = "canvas/Computer.png"          # ВЕРНУЛИ ИКОНКУ!
+                    image_path = "canvas/Computer.png"
 
                 elif node_type == "soap":
-                    image_path = "canvas/Switch.png"            # ВЕРНУЛИ ИКОНКУ!
+                    image_path = "canvas/Switch.png"
 
                 # ——— РИСОВАНИЕ ОСНОВНОЙ ИКОНКИ ———
                 w = h = 0
@@ -212,6 +224,35 @@ class MapCanvas(QGraphicsView):
                 self.node_items[key] = items
 
         self.update_selection_graphics()
+
+    def show_loading_indicator(self):
+        """Показывает индикатор загрузки"""
+        if not self.loading_text_item:
+            self.scene.clear()
+            self.scene.setBackgroundBrush(QBrush(QColor("#008080")))
+            
+            # Создаем текст "Загрузка..."
+            self.loading_text_item = self.scene.addText("Загрузка данных карты...")
+            self.loading_text_item.setDefaultTextColor(QColor("#FFC107"))
+            font = self.loading_text_item.font()
+            font.setPixelSize(24)
+            font.setBold(True)
+            self.loading_text_item.setFont(font)
+            
+            # Центрируем текст
+            rect = self.sceneRect()
+            text_rect = self.loading_text_item.boundingRect()
+            self.loading_text_item.setPos(
+                rect.center().x() - text_rect.width() / 2,
+                rect.center().y() - text_rect.height() / 2
+            )
+            self.loading_text_item.setZValue(1000)
+
+    def hide_loading_indicator(self):
+        """Убирает индикатор загрузки"""
+        if self.loading_text_item:
+            self.scene.removeItem(self.loading_text_item)
+            self.loading_text_item = None
 
     def update_node_graphics(self, node, ntype):
         key = (node["id"], ntype)
@@ -486,6 +527,9 @@ class MapCanvas(QGraphicsView):
                     node, ntype, _ = result
                     if ntype == "plan_switch":
                         self.show_plan_switch_context_menu(self._context_menu_pos, node)
+                    elif ntype in ["switch", "user", "soap"]:
+                        # Показываем специальное меню для оборудования
+                        self.show_device_context_menu(self._context_menu_pos, node, ntype)
                     else:
                         self.show_context_menu(self._context_menu_pos)
                 else:
@@ -703,3 +747,56 @@ class MapCanvas(QGraphicsView):
             PlanSwitchInfoDialog(self.current_hover_node, self).exec()
         self.current_hover_node = None
         self.current_hover_type = None
+
+    def show_device_context_menu(self, position, node, ntype):
+        """Контекстное меню для оборудования (switch, user, soap)"""
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu { background-color: #333; color: #FFC107; border: 1px solid #444; border-radius: 4px; padding: 4px; }
+            QMenu::item { padding: 6px 20px; border-radius: 3px; }
+            QMenu::item:selected { background-color: #555; }
+            QMenu::item:disabled { color: #666; background-color: #333; }
+        """)
+        
+        # Добавить звонок
+        add_call_action = menu.addAction("Добавить звонок")
+        add_call_action.triggered.connect(lambda: self.add_call_to_device(node, ntype))
+        
+        # Свитч лежит (добавить в глобальные неисправности)
+        add_issue_action = menu.addAction("Свитч лежит")
+        add_issue_action.triggered.connect(lambda: self.add_device_to_global_issues(node, ntype))
+        
+        # Порты с проблемами (пока отключено)
+        ports_action = menu.addAction("Порты с проблемами")
+        ports_action.setEnabled(False)
+        
+        menu.exec(self.mapToGlobal(position))
+    
+    def add_call_to_device(self, node, ntype):
+        """Добавить звонок к устройству (пока просто открывает диалог глобальных неисправностей)"""
+        if hasattr(self.parent, "show_global_issues_dialog"):
+            self.parent.show_global_issues_dialog()
+            self.show_message("Добавьте звонок в окне глобальных неисправностей")
+        else:
+            self.show_message("Функция недоступна")
+    
+    def add_device_to_global_issues(self, node, ntype):
+        """Добавляет устройство в глобальные неисправности"""
+        from globals_dialog import GlobalIssuesDialog
+        
+        # Подготавливаем информацию об устройстве
+        device_info = {
+            "type": ntype,
+            "id": node.get("id", ""),
+            "name": node.get("name", "Неизвестно"),
+            "ip": node.get("ip", "Нет IP")
+        }
+        
+        # Открываем диалог глобальных неисправностей
+        if hasattr(self.parent, "ws_client"):
+            dialog = GlobalIssuesDialog(self.parent, self.parent.ws_client)
+            # Сразу открываем форму добавления с информацией об устройстве
+            dialog.add_issue(device_info=device_info)
+            dialog.exec()
+        else:
+            self.show_message("Нет связи с сервером")

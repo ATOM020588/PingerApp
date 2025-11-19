@@ -2,6 +2,7 @@
 import os
 import json
 import hashlib
+import pickle
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QStatusBar, QWidget, QCheckBox, QApplication
@@ -11,7 +12,6 @@ from PyQt6.QtGui import QPixmap
 import asyncio
 import websockets
 from websockets.protocol import State
-
 
 class WebSocketLoginClient(QThread):
     connected = pyqtSignal(bool)
@@ -75,7 +75,6 @@ class WebSocketLoginClient(QThread):
     def stop(self):
         self.running = False
 
-
 class LoginDialog(QDialog):
     login_successful = pyqtSignal(dict)
 
@@ -85,13 +84,23 @@ class LoginDialog(QDialog):
         self.setFixedSize(350, 540)
         self.setStyleSheet("background-color: #333; color: #FFC107;")
 
+        # Инициализация QSettings для резервного сохранения
+        self.settings = QSettings("Network Management System", "UserSession")
+
+        # Переменные для сохраненных данных
+        self.saved_login = ""
+        self.saved_password_hash = ""
+
         self.ws_client = WebSocketLoginClient()
         self.ws_client.connected.connect(self.on_connection_changed)
-        self.ws_client.login_response.connect(self.on_login_response)  # ← ЭТОТ МЕТОД ДОЛЖЕН БЫТЬ!
+        self.ws_client.login_response.connect(self.on_login_response)
         self.ws_client.start()
 
         self.is_connected = False
         self.setup_ui()
+
+        # Загрузка сохраненных учетных данных (БЕЗ автологина)
+        self.load_saved_credentials()
 
     def setup_ui(self):
         layout = QVBoxLayout()
@@ -182,6 +191,82 @@ class LoginDialog(QDialog):
         else:
             self.status_bar.showMessage("Ожидание подключения к серверу...", 0)
 
+    def load_saved_credentials(self):
+        """Загружает сохраненные учетные данные из session.pkl или QSettings"""
+        # Приоритет: session.pkl > QSettings
+        session_file = "session.pkl"
+        
+        try:
+            if os.path.exists(session_file):
+                with open(session_file, "rb") as f:
+                    session_data = pickle.load(f)
+                    
+                if isinstance(session_data, dict):
+                    self.saved_login = session_data.get("login", "")
+                    self.saved_password_hash = session_data.get("password_hash", "")
+                    remember_me = session_data.get("remember_me", False)
+                    
+                    if self.saved_login and remember_me:
+                        self.login_input.setText(self.saved_login)
+                        # Пароль заполняем звездочками для визуализации
+                        self.password_input.setText("********")
+                        self.remember_checkbox.setChecked(True)
+                        print(f"Загружены учетные данные из session.pkl для пользователя: {self.saved_login}")
+                        return
+        except Exception as e:
+            print(f"Ошибка загрузки из session.pkl: {e}")
+        
+        # Fallback к QSettings
+        self.saved_login = self.settings.value("saved_login", "")
+        self.saved_password_hash = self.settings.value("saved_password_hash", "")
+        remember_me = self.settings.value("remember_me", False, type=bool)
+
+        if self.saved_login and self.saved_password_hash and remember_me:
+            self.login_input.setText(self.saved_login)
+            # Пароль заполняем звездочками для визуализации
+            self.password_input.setText("********")
+            self.remember_checkbox.setChecked(True)
+            print(f"Загружены учетные данные из QSettings для пользователя: {self.saved_login}")
+
+    def save_credentials(self, login, password_hash):
+        """Сохраняет учетные данные в session.pkl и QSettings"""
+        if self.remember_checkbox.isChecked():
+            # Сохранение в session.pkl (основной способ)
+            session_file = "session.pkl"
+            session_data = {
+                "login": login,
+                "password_hash": password_hash,
+                "remember_me": True
+            }
+            
+            try:
+                with open(session_file, "wb") as f:
+                    pickle.dump(session_data, f)
+                print(f"Учетные данные сохранены в session.pkl для пользователя: {login}")
+            except Exception as e:
+                print(f"Ошибка сохранения в session.pkl: {e}")
+            
+            # Резервное сохранение в QSettings
+            self.settings.setValue("saved_login", login)
+            self.settings.setValue("saved_password_hash", password_hash)
+            self.settings.setValue("remember_me", True)
+            self.settings.sync()
+        else:
+            # Если чекбокс не отмечен, удаляем сохраненные данные
+            session_file = "session.pkl"
+            if os.path.exists(session_file):
+                try:
+                    os.remove(session_file)
+                    print("Файл session.pkl удален")
+                except Exception as e:
+                    print(f"Ошибка удаления session.pkl: {e}")
+            
+            self.settings.remove("saved_login")
+            self.settings.remove("saved_password_hash")
+            self.settings.setValue("remember_me", False)
+            self.settings.sync()
+            print("Учетные данные не сохранены (чекбокс не отмечен)")
+
     def attempt_login(self):
         if not self.is_connected:
             self.status_bar.showMessage("Нет связи с сервером", 5000)
@@ -194,7 +279,13 @@ class LoginDialog(QDialog):
             self.status_bar.showMessage("Заполните все поля", 5000)
             return
 
-        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        # Проверяем, использует ли пользователь сохраненный пароль
+        if password == "********" and self.saved_password_hash:
+            # Используем сохраненный хеш
+            password_hash = self.saved_password_hash
+        else:
+            # Хешируем введенный пароль
+            password_hash = hashlib.sha256(password.encode()).hexdigest()
 
         self.login_input.setEnabled(False)
         self.password_input.setEnabled(False)
@@ -202,8 +293,6 @@ class LoginDialog(QDialog):
 
         self.ws_client.send_login(login, password_hash)
 
-    # ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
-    # ЭТОТ МЕТОД ДОЛЖЕН БЫТЬ ОБЯЗАТЕЛЬНО!
     def on_login_response(self, response):
         self.login_input.setEnabled(True)
         self.password_input.setEnabled(True)
@@ -211,17 +300,18 @@ class LoginDialog(QDialog):
 
         current_login = self.login_input.text().strip()
         current_password = self.password_input.text()
-        password_hash = hashlib.sha256(current_password.encode()).hexdigest()
+        
+        # Получаем правильный хеш пароля
+        if current_password == "********" and self.saved_password_hash:
+            password_hash = self.saved_password_hash
+        else:
+            password_hash = hashlib.sha256(current_password.encode()).hexdigest()
 
         if response.get("success"):
             self.status_bar.showMessage("Вход успешен", 5000)
 
-            # Сохраняем логин и пароль ТОЛЬКО если стоит галочка
-            settings = QSettings("PINGER", "UserSession")
-            settings.setValue("saved_login", current_login)
-            settings.setValue("saved_password_hash", password_hash)
-            settings.setValue("remember_me", True)
-            settings.sync()  # ← КРИТИЧНО!
+            # Сохранение учетных данных при успешном входе
+            self.save_credentials(current_login, password_hash)
 
             user_data = response.get("user", {})
             user_data["login"] = current_login
@@ -233,6 +323,22 @@ class LoginDialog(QDialog):
             self.status_bar.showMessage(f"Ошибка: {error}", 6000)
             self.password_input.clear()
             self.password_input.setFocus()
+
+    def get_credentials(self):
+        """Возвращает логин и хеш пароля после успешного входа"""
+        login = self.login_input.text().strip()
+        password = self.password_input.text()
+        
+        if password == "********" and self.saved_password_hash:
+            password_hash = self.saved_password_hash
+        else:
+            password_hash = hashlib.sha256(password.encode()).hexdigest()
+        
+        return login, password_hash
+
+    def get_user_login(self):
+        """Возвращает логин пользователя"""
+        return self.login_input.text().strip()
 
     def closeEvent(self, event):
         self.ws_client.stop()

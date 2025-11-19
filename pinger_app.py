@@ -16,13 +16,13 @@ from datetime import datetime
 import asyncio
 import websockets
 import uuid
-from websockets.protocol import State 
+from websockets.protocol import State
 
 # === WebSocket Client ===
 class WebSocketClient(QThread):
     connected = pyqtSignal(bool)
     message_received = pyqtSignal(dict)
-    
+
     def __init__(self, uri="ws://127.0.0.1:8081"):
         super().__init__()
         self.uri = uri
@@ -30,19 +30,19 @@ class WebSocketClient(QThread):
         self.loop = None
         self.running = True
         self.pending_requests = {}
-        
+
     def run(self):
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
         self.loop.run_until_complete(self._main())
-        
+
     async def _main(self):
         while self.running:
             try:
                 async with websockets.connect(self.uri, ping_interval=20, ping_timeout=10) as ws:
                     self.websocket = ws
                     self.connected.emit(True)
-                    
+
                     while self.running and ws.state == State.OPEN:
                         await asyncio.sleep(1)
                         try:
@@ -54,7 +54,7 @@ class WebSocketClient(QThread):
                         except Exception as e:
                             print(f"[WS] Error receiving: {e}")
                             break
-                            
+
             except Exception as e:
                 print(f"[WS] Connection error: {e}")
                 self.connected.emit(False)
@@ -63,7 +63,7 @@ class WebSocketClient(QThread):
             finally:
                 self.websocket = None
                 self.connected.emit(False)
-                
+
     def send_request(self, action, **kwargs):
         if self.websocket and self.isRunning():
             request_id = str(uuid.uuid4())
@@ -73,7 +73,7 @@ class WebSocketClient(QThread):
             )
             return request_id
         return None
-        
+
     def stop(self):
         self.running = False
 
@@ -108,11 +108,14 @@ class MapNameDialog(QDialog):
         """)
 
 class OpenMapDialog(QDialog):
-    def __init__(self, parent=None, map_files=None):
+    def __init__(self, parent=None, map_files=None, ws_client=None):
         super().__init__(parent)
         self.setWindowTitle("Открыть карту")
         self.setFixedSize(785, 400)
         self.map_files = map_files or []
+        self.ws_client = ws_client
+        self.parent_window = parent
+        
         layout = QVBoxLayout()
         self.table = QTableWidget()
         self.table.setColumnCount(3)
@@ -150,10 +153,12 @@ class OpenMapDialog(QDialog):
         """)
 
     def populate_table(self):
+        """ИСПРАВЛЕНО: Показываем только имена файлов, без загрузки данных"""
         self.table.setRowCount(len(self.map_files))
         for row, map_file in enumerate(self.map_files):
             map_name = map_file.replace(".json", "").replace("map_", "")
-            for col, value in enumerate([map_name, "lasteditor", "lastpingdatetime"]):
+            # Показываем только имя, остальные колонки оставляем пустыми для быстрой загрузки
+            for col, value in enumerate([map_name, "", ""]):
                 item = QTableWidgetItem(value)
                 item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
                 self.table.setItem(row, col, item)
@@ -207,49 +212,36 @@ from widgets import (
 
 #   ===Импорт класса MapCanvas===
 from canvas import *
+from globals_dialog import GlobalIssuesDialog
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, user_login=None):
         super().__init__()
         self.setWindowIcon(QIcon("icon.ico"))
         self.open_maps = []
-        
-        self.settings = QSettings("Network Management System", "UserSession")
-
-        # Восстановление открытых карт
-        saved_maps = self.settings.value("open_maps", [], type=list)
-        if saved_maps:
-            self.open_maps = saved_maps
-            self.active_map_id = self.settings.value("active_map_id", None)
-            if not self.active_map_id and self.open_maps:
-                self.active_map_id = self.open_maps[0]["id"]
-        else:
-            self.open_maps = []
-            self.active_map_id = None
-
-        # Автологин
-        saved_login = self.settings.value("saved_login", "")
-        saved_hash = self.settings.value("saved_password_hash", "")
-        if saved_login and saved_hash:
-            self.auto_login(saved_login, saved_hash)
-        
         self.active_map_id = None
         self.map_data = {}
         self.is_edit_mode = False
         self.setWindowTitle("Network Management System")
-        
-        # Умная синхронизация pingok каждые 12 секунд
-        self.ping_sync_timer = QTimer(self)
-        self.ping_sync_timer.timeout.connect(self.check_ping_updates)
-        self.ping_sync_timer.start(12000)  # 12 секунд — оптимально
-        # WebSocket client
+
+        # Сохраняем логин пользователя для записи в карты
+        self.current_user = user_login or "Неизвестный"
+
+        self.settings = QSettings("Network Management System", "UserSession")
+
+        # WebSocket client - ИНИЦИАЛИЗИРУЕМ ДО load_open_maps()
         self.ws_client = WebSocketClient()
         self.ws_client.connected.connect(self.on_ws_connected)
         self.ws_client.message_received.connect(self.on_ws_message)
         self.ws_client.start()
         self.ws_connected = False
         self.pending_requests = {}
-        
+
+        # Умная синхронизация pingok каждые 12 секунд
+        self.ping_sync_timer = QTimer(self)
+        self.ping_sync_timer.timeout.connect(self.check_ping_updates)
+        self.ping_sync_timer.start(12000)  # 12 секунд — оптимально
+
         self.setStyleSheet("""
             QMainWindow { background-color: #333; }
             QMenuBar { background-color: #333; color: #FFC107; border-bottom: 3px solid #FFC107; padding: 5px 0px 5px 0px; min-height: 15px; }
@@ -290,24 +282,26 @@ class MainWindow(QMainWindow):
 
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
-        self.status_bar = self.statusBar()
         layout = QVBoxLayout()
         main_widget.setLayout(layout)
 
         button_layout = QHBoxLayout()
+        global_issues_button = QPushButton("Глобальные неисправности")
         ping_button = QPushButton("Пинговать устройства")
         self.settings_button = QPushButton("Параметры карты")
         self.edit_button = QPushButton("Редактировать")
+        global_issues_button.clicked.connect(self.show_global_issues_dialog)
         ping_button.clicked.connect(self.ping_switches)
         self.settings_button.clicked.connect(self.show_map_settings_dialog)
         self.edit_button.clicked.connect(self.toggle_edit_mode)
         self.settings_button.setEnabled(False)
         button_layout.addStretch()
+        button_layout.addWidget(global_issues_button)
         button_layout.addWidget(ping_button)
         button_layout.addWidget(self.settings_button)
         button_layout.addWidget(self.edit_button)
         layout.addLayout(button_layout)
-        for btn in [ping_button, self.settings_button, self.edit_button]:
+        for btn in [global_issues_button, ping_button, self.settings_button, self.edit_button]:
             btn.setStyleSheet("""
                 QPushButton { background-color: #333; color: #FFC107; font-size: 12px; border: none; border-radius: 2px; padding: 5px; }
                 QPushButton:hover { background-color: #FFC107; color: #333; }
@@ -332,50 +326,69 @@ class MainWindow(QMainWindow):
         """)
 
         self.setGeometry(100, 100, 1200, 900)
-        
+
+        # ИСПРАВЛЕНИЕ: Статус бар создается ДО загрузки карт
         self.status_bar = self.statusBar()
         self.status_bar.setFixedHeight(20)
         self.status_bar.setStyleSheet("""
             QStatusBar { background-color: #333; color: #FFC107; font-size: 12px; }
             QStatusBar::item { border: none; padding: 5px 20px; }
         """)
+        
+        # Добавляем индикатор связи в правой части статус бара
+        self.connection_indicator = QLabel()
+        self.connection_indicator.setStyleSheet("""
+            QLabel {
+                color: #FFC107;
+                padding: 2px 10px;
+                font-size: 11px;
+            }
+        """)
+        self.status_bar.addPermanentWidget(self.connection_indicator)
+        self.update_connection_indicator(False)  # Изначально нет связи
 
+        # ИСПРАВЛЕНИЕ: Загрузка открытых карт ПОСЛЕ создания status_bar
         self.load_open_maps()
+
+    def update_connection_indicator(self, connected):
+        """Обновляет индикатор связи с сервером"""
+        if connected:
+            # Зеленый кружок Unicode: ●
+            self.connection_indicator.setText("● Связь с сервером")
+            self.connection_indicator.setStyleSheet("""
+                QLabel {
+                    color: #00ff00;
+                    padding: 2px 10px;
+                    font-size: 11px;
+                    font-weight: bold;
+                }
+            """)
+        else:
+            # Красный кружок Unicode: ●
+            self.connection_indicator.setText("● Нет связи")
+            self.connection_indicator.setStyleSheet("""
+                QLabel {
+                    color: #ff0000;
+                    padding: 2px 10px;
+                    font-size: 11px;
+                    font-weight: bold;
+                }
+            """)
 
     def on_ws_connected(self, connected):
         self.ws_connected = connected
+        self.update_connection_indicator(connected)
         if connected:
             self.status_bar.showMessage("Подключено к серверу", 3000)
         else:
             self.status_bar.showMessage("Нет связи с сервером", 3000)
-            
+
     def on_ws_message(self, data):
         request_id = data.get("request_id")
         if request_id in self.pending_requests:
             callback = self.pending_requests.pop(request_id)
             callback(data)
 
-    def auto_login(self, login, password_hash):
-        """Попытка автоматического входа"""
-        if not self.ws_connected:
-            QTimer.singleShot(1000, lambda: self.auto_login(login, password_hash))
-            return
-
-        request_id = self.ws_client.send_request("auth_login", login=login, password_hash=password_hash)
-
-        def on_auto_login_response(data):
-            if data.get("success"):
-                self.status_bar.showMessage(f"Автовход: {login}", 3000)
-                # Ничего не делаем — main() уже ждёт успешного логина
-            else:
-                self.status_bar.showMessage("Автовход не удался — введите пароль", 5000)
-                self.settings.remove("saved_login")
-                self.settings.remove("saved_password_hash")
-
-        if request_id:
-            self.pending_requests[request_id] = on_auto_login_response
-    
-    
     def update_status_bar(self):
         if self.active_map_id:
             map_info = self.map_data.get(self.active_map_id, {}).get("map", {})
@@ -384,8 +397,7 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"Последние изменения: {last_adm} в {mod_time}")
         else:
             self.status_bar.clearMessage()
-    
-    
+
     def get_current_ping_hashes(self):
         """Возвращает словарь {индекс: хеш(pingok)} для текущей карты"""
         if not self.active_map_id:
@@ -436,43 +448,72 @@ class MainWindow(QMainWindow):
                 self.status_bar.showMessage(f"Обновлено статусов: {len(updates)}", 2000)
 
         self.pending_requests[request_id] = on_updates_response
-    
+
     def load_open_maps(self):
+        """ИСПРАВЛЕНО: Загружает открытые карты из файла open_maps.pkl"""
         try:
-            if os.path.exists("open_maps.pkl"):
-                with open("open_maps.pkl", "rb") as f:
-                    self.open_maps = pickle.load(f)
-                if self.open_maps:
-                    self.active_map_id = self.open_maps[0]["id"]
-                    self.open_map(self.active_map_id)
-                    self.update_tabs()
-                    self.update_status_bar()
+            pickle_file = "open_maps.pkl"
+            if os.path.exists(pickle_file):
+                with open(pickle_file, "rb") as f:
+                    loaded_data = pickle.load(f)
+
+                # Проверка типа: должен быть список словарей
+                if isinstance(loaded_data, list):
+                    # Фильтруем только словари с нужными ключами
+                    self.open_maps = []
+                    for item in loaded_data:
+                        if isinstance(item, dict) and "id" in item and "name" in item:
+                            self.open_maps.append(item)
+                        elif isinstance(item, str):
+                            # Если это строка, создаем словарь
+                            self.open_maps.append({"id": item, "name": item})
+
+                    if self.open_maps:
+                        self.active_map_id = self.open_maps[0]["id"]
+                        # ИСПРАВЛЕНИЕ: Счетчик для отслеживания загрузки всех карт
+                        self.maps_to_load = len(self.open_maps)
+                        self.maps_loaded_data = {}  # Кэш для загруженных данных
+                        # Загружаем все открытые карты
+                        for map_info in self.open_maps:
+                            self.open_map(map_info["id"], is_initial_load=True)
+                        print(f"Начата загрузка {len(self.open_maps)} открытых карт")
+                else:
+                    print("Некорректный формат данных в open_maps.pkl")
+                    self.open_maps = []
         except Exception as e:
-            self.status_bar.showMessage("Ошибка загрузки открытых карт", 3000)
-            QTimer.singleShot(3000, self.update_status_bar)
+            print(f"Ошибка загрузки открытых карт: {e}")
+            self.open_maps = []
 
     def save_open_maps(self):
+        """Сохраняет открытые карты в файл open_maps.pkl"""
         try:
-            # Сохраняем только id и имя
+            pickle_file = "open_maps.pkl"
+            # Сохраняем только id и name
             clean_maps = [
-                {"id": m["id"], "name": m["name"]} 
+                {"id": m["id"], "name": m["name"]}
                 for m in self.open_maps
+                if isinstance(m, dict) and "id" in m and "name" in m
             ]
-            self.settings.setValue("open_maps", clean_maps)
-            self.settings.setValue("active_map_id", self.active_map_id)
-            self.settings.sync()
+            with open(pickle_file, "wb") as f:
+                pickle.dump(clean_maps, f)
+            print(f"Сохранено {len(clean_maps)} открытых карт в {pickle_file}")
         except Exception as e:
-            print(f"Ошибка сохранения сессии: {e}")
+            print(f"Ошибка сохранения открытых карт: {e}")
 
     def update_tabs(self):
+        """ИСПРАВЛЕНО: Обновляет вкладки с проверкой наличия данных"""
         self.tabs.blockSignals(True)
         self.tabs.clear()
         for map_info in self.open_maps:
-            canvas = MapCanvas(self.map_data.get(map_info["id"], {}), self)
+            map_data = self.map_data.get(map_info["id"], {})
+            canvas = MapCanvas(map_data, self)
             canvas.is_edit_mode = self.is_edit_mode
             self.tabs.addTab(canvas, map_info["name"])
             if map_info["id"] == self.active_map_id:
                 self.tabs.setCurrentWidget(canvas)
+            # ИСПРАВЛЕНИЕ: Рендерим только если данные есть
+            if map_data and "map" in map_data:
+                canvas.render_map()
         self.tabs.blockSignals(False)
         self.settings_button.setEnabled(self.is_edit_mode and bool(self.active_map_id))
 
@@ -515,20 +556,20 @@ class MainWindow(QMainWindow):
         if not self.ws_connected:
             self.show_toast("Нет связи с сервером", "error")
             return
-            
+
         # Request list of maps from server
         request_id = self.ws_client.send_request("list_maps")
-        
+
         def on_list_response(data):
             if data.get("success"):
                 map_files = data.get("files", [])
-                dialog = OpenMapDialog(self, map_files)
+                dialog = OpenMapDialog(self, map_files, self.ws_client)
                 dialog.setModal(False)
                 dialog.accepted.connect(lambda: self.on_open_map_accepted(dialog, map_files))
                 dialog.show()
             else:
                 self.show_toast(f"Ошибка загрузки списка карт: {data.get('error')}", "error")
-                
+
         self.pending_requests[request_id] = on_list_response
 
     def on_open_map_accepted(self, dialog, map_files):
@@ -536,11 +577,20 @@ class MainWindow(QMainWindow):
             selected_file = map_files[dialog.table.currentRow()]
             map_name = selected_file.replace(".json", "").replace("map_", "")
             map_id = map_name
-            
-            if map_id not in [m["id"] for m in self.open_maps]:
+
+            # ИСПРАВЛЕНИЕ: Проверяем, что open_maps содержит словари
+            open_map_ids = []
+            for m in self.open_maps:
+                if isinstance(m, dict) and "id" in m:
+                    open_map_ids.append(m["id"])
+                elif isinstance(m, str):
+                    open_map_ids.append(m)
+
+            if map_id not in open_map_ids:
                 self.open_maps.append({"id": map_id, "name": map_id})
                 self.active_map_id = map_id
                 self.open_map(map_id)
+                self.save_open_maps()
                 self.update_tabs()
                 self.update_status_bar()
                 self.show_toast(f"Карта '{map_id}' открыта", "success")
@@ -554,21 +604,23 @@ class MainWindow(QMainWindow):
         if not self.active_map_id:
             self.show_toast("Нет активной карты для сохранения", "info")
             return
-            
+
         if not self.ws_connected:
             self.show_toast("Нет связи с сервером", "error")
             return
-            
+
         try:
+            # Обновляем время и пользователя
             self.map_data[self.active_map_id]["map"]["mod_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
+            self.map_data[self.active_map_id]["map"]["last_adm"] = self.current_user
+
             # Send to server
             request_id = self.ws_client.send_request(
                 "file_put",
                 path=f"maps/map_{self.active_map_id}.json",
                 data=self.map_data[self.active_map_id]
             )
-            
+
             def on_save_response(data):
                 if data.get("success"):
                     self.status_bar.showMessage("Карта успешно сохранена", 3000)
@@ -576,9 +628,9 @@ class MainWindow(QMainWindow):
                 else:
                     self.status_bar.showMessage(f"Ошибка сохранения: {data.get('error')}", 3000)
                     QTimer.singleShot(3000, self.update_status_bar)
-                    
+
             self.pending_requests[request_id] = on_save_response
-            
+
         except Exception as e:
             self.status_bar.showMessage("Ошибка сохранения карты", 3000)
             QTimer.singleShot(3000, self.update_status_bar)
@@ -677,24 +729,24 @@ class MainWindow(QMainWindow):
     def toggle_edit_mode(self):
         self.is_edit_mode = not self.is_edit_mode
         self.edit_button.setStyleSheet("""
-            QPushButton { 
-                background-color: #FFC107; 
-                color: #333; 
-                font-size: 12px; 
-                border: none; 
-                border-radius: 2px; 
-                padding: 5px; 
+            QPushButton {
+                background-color: #FFC107;
+                color: #333;
+                font-size: 12px;
+                border: none;
+                border-radius: 2px;
+                padding: 5px;
             }
             QPushButton:hover { background-color: #FFCA28; color: #333; }
             QPushButton:pressed { background-color: #FFCA28; color: #333; }
         """ if self.is_edit_mode else """
-            QPushButton { 
-                background-color: #333; 
-                color: #FFC107; 
-                font-size: 12px; 
-                border: none; 
-                border-radius: 2px; 
-                padding: 5px; 
+            QPushButton {
+                background-color: #333;
+                color: #FFC107;
+                font-size: 12px;
+                border: none;
+                border-radius: 2px;
+                padding: 5px;
             }
             QPushButton:hover { background-color: #FFC107; color: #333; }
             QPushButton:pressed { background-color: #FFC107; color: #333; }
@@ -707,28 +759,28 @@ class MainWindow(QMainWindow):
             tab.render_map()
         if not self.is_edit_mode:
             self.save_map()
-            
+
     def sync_edit_mode(self, is_edit_mode):
         self.is_edit_mode = is_edit_mode
         self.edit_button.setStyleSheet("""
-            QPushButton { 
-                background-color: #FFC107; 
-                color: #333; 
-                font-size: 12px; 
-                border: none; 
-                border-radius: 2px; 
-                padding: 10px; 
+            QPushButton {
+                background-color: #FFC107;
+                color: #333;
+                font-size: 12px;
+                border: none;
+                border-radius: 2px;
+                padding: 10px;
             }
             QPushButton:hover { background-color: #FFCA28; color: #333; }
             QPushButton:pressed { background-color: #FFCA28; color: #333; }
         """ if self.is_edit_mode else """
-            QPushButton { 
-                background-color: #333; 
-                color: #FFC107; 
-                font-size: 12px; 
-                border: none; 
-                border-radius: 2px; 
-                padding: 10px; 
+            QPushButton {
+                background-color: #333;
+                color: #FFC107;
+                font-size: 12px;
+                border: none;
+                border-radius: 2px;
+                padding: 10px;
             }
             QPushButton:hover { background-color: #FFC107; color: #333; }
             QPushButton:pressed { background-color: #FFC107; color: #333; }
@@ -743,6 +795,8 @@ class MainWindow(QMainWindow):
             self.save_map()
 
     def close_tab(self, index):
+        if index < 0 or index >= len(self.open_maps):
+            return
         map_id = self.open_maps[index]["id"]
         self.open_maps.pop(index)
         self.save_open_maps()
@@ -753,13 +807,14 @@ class MainWindow(QMainWindow):
         self.update_tabs()
 
     def switch_tab(self, index):
-        if index >= 0 and self.open_maps[index]["id"] != self.active_map_id:
+        if index >= 0 and index < len(self.open_maps) and self.open_maps[index]["id"] != self.active_map_id:
             self.active_map_id = self.open_maps[index]["id"]
             self.update_tabs()
 
-    def open_map(self, map_id):
+    def open_map(self, map_id, is_initial_load=False):
+        """ИСПРАВЛЕНО: Загружает карту и принудительно обновляет Canvas"""
         self.active_map_id = map_id
-        
+
         if not self.ws_connected:
             # Fallback to empty map
             self.map_data[map_id] = {
@@ -771,18 +826,24 @@ class MainWindow(QMainWindow):
                 "legends": [],
                 "magistrals": []
             }
+            # Если это начальная загрузка, уменьшаем счетчик
+            if is_initial_load and hasattr(self, 'maps_to_load'):
+                self.maps_to_load -= 1
+                if self.maps_to_load == 0:
+                    self.update_tabs()
+                    self.update_status_bar()
             return
-            
+
         # Request from server
         request_id = self.ws_client.send_request(
             "file_get",
             path=f"maps/map_{map_id}.json"
         )
-        
+
         def on_load_response(data):
             if data.get("success"):
                 self.map_data[map_id] = data.get("data")
-                self.update_tabs()
+                print(f"✓ Данные карты '{map_id}' загружены успешно")
             else:
                 self.map_data[map_id] = {
                     "map": {"name": map_id, "width": "1200", "height": "800"},
@@ -793,8 +854,22 @@ class MainWindow(QMainWindow):
                     "legends": [],
                     "magistrals": []
                 }
-                self.show_toast(f"Карта '{map_id}' не найдена на сервере, создана новая", "info")
-                
+                if not is_initial_load:
+                    self.show_toast(f"Карта '{map_id}' не найдена на сервере, создана новая", "info")
+            
+            # ИСПРАВЛЕНИЕ: Обновляем табы только когда все карты загружены
+            if is_initial_load and hasattr(self, 'maps_to_load'):
+                self.maps_to_load -= 1
+                print(f"Загружена карта '{map_id}', осталось: {self.maps_to_load}")
+                if self.maps_to_load == 0:
+                    print("✓ Все карты загружены, обновляем интерфейс")
+                    self.update_tabs()
+                    self.update_status_bar()
+            else:
+                # Для карт, открытых вручную, обновляем сразу
+                self.update_tabs()
+                self.update_status_bar()
+
         self.pending_requests[request_id] = on_load_response
 
     def show_toast(self, message, toast_type="info"):
@@ -815,22 +890,29 @@ class MainWindow(QMainWindow):
     def show_engineers_management_dialog(self):
         dialog = EngineersManagementDialog(self)
         dialog.exec()
-        
+
     def show_models_management_dialog(self):
         dialog = ModelsManagementDialog(self)
         dialog.exec()
-        
+
+    def show_global_issues_dialog(self):
+        """Показывает диалог глобальных неисправностей"""
+        dialog = GlobalIssuesDialog(self, self.ws_client)
+        dialog.exec()
 
 def main():
     app = QApplication(sys.argv)
-    
+
     # Показать диалог логина
     from login_dialog import LoginDialog
     login_dialog = LoginDialog()
-    
+
     if login_dialog.exec() == QDialog.DialogCode.Accepted:
-        # Логин успешен, показываем главное окно
-        window = MainWindow()
+        # Логин успешен, получаем логин пользователя
+        user_login = login_dialog.get_user_login()
+
+        # Показываем главное окно с логином пользователя
+        window = MainWindow(user_login=user_login)
         window.showMaximized()
         window.show()
         sys.exit(app.exec())
