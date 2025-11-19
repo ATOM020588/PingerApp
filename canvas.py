@@ -765,9 +765,11 @@ class MapCanvas(QGraphicsView):
             QMenu::item:disabled { color: #666; background-color: #333; }
         """)
 
-        # 1. Telnet
+        ip = node.get("ip", "").strip()
+
+        # === TELNET ===
         telnet_action = menu.addAction("Telnet")
-        telnet_action.triggered.connect(lambda: self.show_message("Telnet - функция в разработке"))
+        telnet_action.triggered.connect(lambda: self.run_telnet(ip))
 
         # 2. Редактировать
         edit_action = menu.addAction("Редактировать")
@@ -788,9 +790,9 @@ class MapCanvas(QGraphicsView):
         find_report_action = menu.addAction("Найти в глоб репорте")
         find_report_action.triggered.connect(lambda: self.show_message("Найти в глоб репорте - функция в разработке"))
 
-        # 5. Ping
+        # === PING ===
         ping_action = menu.addAction("Ping")
-        ping_action.triggered.connect(lambda: self.show_message("Ping - функция в разработке"))
+        ping_action.triggered.connect(lambda: self.run_ping(ip))
 
         # 6. Flood ping
         flood_ping_action = menu.addAction("Flood ping")
@@ -817,6 +819,53 @@ class MapCanvas(QGraphicsView):
         delete_action.triggered.connect(lambda: self.show_message("Удалить свитч - функция в разработке"))
 
         menu.exec(self.mapToGlobal(position))
+
+    def run_ping(self, ip):
+        if not ip:
+            self.show_message("У устройства нет IP")
+            return
+
+        import subprocess, platform
+
+        count = "4" if platform.system().lower() == "windows" else "4"
+        param = "-n" if platform.system().lower() == "windows" else "-c"
+
+        try:
+            subprocess.Popen(
+                ["cmd", "/c", f"ping {param} {count} {ip}"],
+                creationflags=subprocess.CREATE_NEW_CONSOLE
+            )
+        except Exception:
+            # Linux/Mac fallback
+            os.system(f"xterm -e 'ping {param} {count} {ip}' &")
+
+    def run_telnet(self, ip):
+        if not ip:
+            self.show_message("У устройства нет IP")
+            return
+
+        import subprocess
+
+        # Проверяем PuTTY
+        possible_paths = [
+            r"C:\Program Files\PuTTY\putty.exe",
+            r"C:\Program Files (x86)\PuTTY\putty.exe",
+        ]
+
+        putty_path = None
+        for p in possible_paths:
+            if os.path.exists(p):
+                putty_path = p
+                break
+
+        try:
+            if putty_path:
+                subprocess.Popen([putty_path, "-telnet", ip])
+            else:
+                subprocess.Popen(["cmd", "/c", f"start telnet {ip}"])
+        except Exception as e:
+            self.show_message(f"Ошибка запуска telnet:\n{e}")
+
 
     def add_call_switch_down(self, node, ntype):
         """Добавить звонок: Свитч лежит"""

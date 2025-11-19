@@ -30,6 +30,9 @@ class WebSocketClient(QThread):
         self.loop = None
         self.running = True
         self.pending_requests = {}
+        # Флаги для отложенной загрузки карт до установления WS-соединения
+        self.open_maps_loaded = False      # true после первой полной попытки загрузки
+        self.load_open_maps_pending = False
 
     def run(self):
         self.loop = asyncio.new_event_loop()
@@ -114,34 +117,35 @@ class OpenMapDialog(QDialog):
         self.setWindowTitle("Открыть карту")
         self.setFixedSize(785, 400)
 
+        self.map_files = map_files or []
+        self.ws_client = ws_client
         self.parent_window = parent
-        self.ws_client = ws_client or getattr(parent, "ws_client", None)
 
-        # If map_files passed from caller, use them; otherwise will request from server
-        self.map_files = map_files or []      # names like "map_TESTS.json"
-        self.map_info = {}       # {filename: {"mod_time": "...", "last_adm": "..."}}
+        self.pending_requests = {}   # req_id → row_index
 
         layout = QVBoxLayout()
 
-        # === Таблица ===
         self.table = QTableWidget()
         self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels(["Название", "Дата и время изменения", "Последние изменения"])
+        self.table.setHorizontalHeaderLabels(["Название", "Дата изменения", "Кто менял"])
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-
         layout.addWidget(QLabel("Выберите карту"))
         layout.addWidget(self.table)
+
+        # --- моментальная загрузка таблицы ---
+        self.populate_base_table()
+        # --- асинхронная догрузка метаданных ---
+        self.load_metadata_async()
 
         self.error_label = QLabel()
         self.error_label.setStyleSheet("color: #FFC107;")
         layout.addWidget(self.error_label)
 
-        # === Кнопки ===
         buttons = QHBoxLayout()
         ok_button = QPushButton("ОК")
         cancel_button = QPushButton("Отмена")
@@ -150,114 +154,69 @@ class OpenMapDialog(QDialog):
         buttons.addWidget(ok_button)
         buttons.addWidget(cancel_button)
         layout.addLayout(buttons)
-
         self.setLayout(layout)
 
-        # === Стили ===
+        # стиль оставить как был
         self.setStyleSheet("""
             QDialog { background-color: #333; color: #FFC107; border: 1px solid #FFC107; }
             QTableWidget { background-color: #444; color: #FFC107; border: 1px solid #555; }
             QTableWidget::item:hover { background-color: #555; }
             QTableWidget::item:selected { background-color: #75736b; color: #333; }
             QHeaderView::section { background-color: #333333; color: #FFC107; border: 1px solid #555; }
-            QPushButton { background-color: #444; color: #FFC107; border: none; border: 1px solid #555; border-radius: 4px; padding: 8px 16px; }
+            QPushButton { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; padding: 8px 16px; }
             QPushButton:hover { background-color: #555; }
             QLabel { color: #FFC107; }
         """)
 
-        # If map_files were provided when creating the dialog, use them; otherwise request from server
-        if self.map_files:
-            # Kick off loading details for provided files
-            for filename in self.map_files:
-                # ensure filename is exactly what server sent (do not add/remove map_)
-                path = f"maps/{filename}"
-                req_id = None
-                if self.ws_client:
-                    req_id = self.ws_client.send_request("file_get", path=path)
-                if req_id and self.parent_window:
-                    self.parent_window.pending_requests[req_id] = (lambda d, fn=filename: self.on_map_details(fn, d))
-                else:
-                    # If WS not available, leave empty info and populate table
-                    self.map_info[filename] = {"mod_time": "", "last_adm": ""}
-            # If no ws_client or pending requests were set, populate table now (will refresh later as data arrives)
-            if not self.ws_client:
-                self.populate_table()
-        else:
-            # Will request the list from server
-            self.load_maps_from_server()
-
-    # ==============================
-    #   ЗАГРУЗКА СПИСКА КАРТ
-    # ==============================
-    def load_maps_from_server(self):
-        if not self.ws_client:
-            self.error_label.setText("Ошибка: нет подключения WS-клиента")
-            return
-
-        req_id = self.ws_client.send_request("list_maps")
-        if self.parent_window is not None:
-            self.parent_window.pending_requests[req_id] = self.on_maps_list_received
-
-    def on_maps_list_received(self, data):
-        if not data.get("success"):
-            self.error_label.setText(f"Ошибка: {data.get('error')}")
-            return
-
-        self.map_files = data.get("files", [])
-
-        if not self.map_files:
-            self.populate_table()
-            return
-
-        # Загружаем каждую карту по очереди
-        for filename in self.map_files:
-            path = f"maps/{filename}"
-            req_id = None
-            if self.ws_client:
-                req_id = self.ws_client.send_request("file_get", path=path)
-            if req_id and self.parent_window:
-                self.parent_window.pending_requests[req_id] = (lambda d, fn=filename: self.on_map_details(fn, d))
-            else:
-                self.map_info[filename] = {"mod_time": "", "last_adm": ""}
-
-    # ==============================
-    #   ПОЛУЧЕНИЕ ДАННЫХ О КАРТЕ
-    # ==============================
-    def on_map_details(self, filename, data):
-        if not data.get("success"):
-            self.map_info[filename] = {"mod_time": "Ошибка", "last_adm": data.get("error", "")}
-        else:
-            file_data = data.get("data", {})
-            self.map_info[filename] = {
-                "mod_time": file_data.get("mod_time", ""),
-                "last_adm": file_data.get("last_adm", ""),
-            }
-
-        # после всех файлов — перерисовать таблицу
-        if len(self.map_info) == len(self.map_files):
-            self.populate_table()
-
-    # ==============================
-    #   ЗАПОЛНЕНИЕ ТАБЛИЦЫ
-    # ==============================
-    def populate_table(self):
+    # ------------------------------
+    #         БЫСТРАЯ ЗАГРУЗКА
+    # ------------------------------
+    def populate_base_table(self):
+        """Заполняет таблицу мгновенно — только именами"""
         self.table.setRowCount(len(self.map_files))
+        for row, map_file in enumerate(self.map_files):
+            map_name = map_file.replace(".json", "").replace("map_", "")
+            self.table.setItem(row, 0, QTableWidgetItem(map_name))
+            self.table.setItem(row, 1, QTableWidgetItem("..."))
+            self.table.setItem(row, 2, QTableWidgetItem("..."))
+
+    # ------------------------------
+    #     АСИНХРОННАЯ ДОГРУЗКА
+    # ------------------------------
+    def load_metadata_async(self):
+        if not self.ws_client:
+            return
 
         for row, map_file in enumerate(self.map_files):
-            # display name without "map_" and suffix
-            map_name = map_file.replace(".json", "").replace("map_", "")
-            info = self.map_info.get(map_file, {})
+            req_id = self.ws_client.send_request(
+                "file_get",
+                path=f"maps/{map_file}"
+            )
+            if req_id:
+                self.pending_requests[req_id] = row
+                self.parent_window.pending_requests[req_id] = self.on_metadata_received
 
-            row_data = [
-                map_name,
-                info.get("mod_time", ""),
-                info.get("last_adm", "")
-            ]
+    def on_metadata_received(self, data):
+        req_id = data.get("request_id")
 
-            for col, value in enumerate(row_data):
-                item = QTableWidgetItem(value)
-                item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
-                self.table.setItem(row, col, item)
+        if req_id not in self.pending_requests:
+            return
+
+        row = self.pending_requests.pop(req_id)
+
+        if not data.get("success"):
+            self.table.setItem(row, 1, QTableWidgetItem("Ошибка"))
+            self.table.setItem(row, 2, QTableWidgetItem("-"))
+            return
+
+        map_json = data.get("data", {}).get("map", {})
+
+        mod_time = map_json.get("mod_time", "Неизвестно")
+        last_adm = map_json.get("last_adm", "Неизвестно")
+
+        self.table.setItem(row, 1, QTableWidgetItem(mod_time))
+        self.table.setItem(row, 2, QTableWidgetItem(last_adm))
+
 
 class MapSettingsDialog(QDialog):
     def __init__(self, parent=None, map_data=None):
@@ -476,6 +435,16 @@ class MainWindow(QMainWindow):
         self.update_connection_indicator(connected)
         if connected:
             self.status_bar.showMessage("Подключено к серверу", 3000)
+            # Если есть отложенные open_maps — запускаем загрузку сейчас
+            if getattr(self, "load_open_maps_pending", False) and not getattr(self, "open_maps_loaded", False):
+                self.load_open_maps_pending = False
+                # Запустить загрузку всех карт
+                if self.open_maps:
+                    self.maps_to_load = len(self.open_maps)
+                    for map_info in self.open_maps:
+                        self.open_map(map_info["id"], is_initial_load=True)
+                    self.open_maps_loaded = True
+                    print("WS подключен — начата отложенная загрузка карт")
         else:
             self.status_bar.showMessage("Нет связи с сервером", 3000)
 
@@ -546,39 +515,52 @@ class MainWindow(QMainWindow):
         self.pending_requests[request_id] = on_updates_response
 
     def load_open_maps(self):
-        """ИСПРАВЛЕНО: Загружает открытые карты из файла open_maps.pkl"""
+        """Читает open_maps.pkl и только подготавливает список карт.
+           Если WS уже подключён — сразу начинает загрузку; иначе помечает флаг ожидания."""
         try:
             pickle_file = "open_maps.pkl"
-            if os.path.exists(pickle_file):
-                with open(pickle_file, "rb") as f:
-                    loaded_data = pickle.load(f)
+            if not os.path.exists(pickle_file):
+                self.open_maps = []
+                return
 
-                # Проверка типа: должен быть список словарей
-                if isinstance(loaded_data, list):
-                    # Фильтруем только словари с нужными ключами
-                    self.open_maps = []
-                    for item in loaded_data:
-                        if isinstance(item, dict) and "id" in item and "name" in item:
-                            self.open_maps.append(item)
-                        elif isinstance(item, str):
-                            # Если это строка, создаем словарь
-                            self.open_maps.append({"id": item, "name": item})
+            with open(pickle_file, "rb") as f:
+                loaded_data = pickle.load(f)
 
-                    if self.open_maps:
-                        self.active_map_id = self.open_maps[0]["id"]
-                        # ИСПРАВЛЕНИЕ: Счетчик для отслеживания загрузки всех карт
-                        self.maps_to_load = len(self.open_maps)
-                        self.maps_loaded_data = {}  # Кэш для загруженных данных
-                        # Загружаем все открытые карты
-                        for map_info in self.open_maps:
-                            self.open_map(map_info["id"], is_initial_load=True)
-                        print(f"Начата загрузка {len(self.open_maps)} открытых карт")
-                else:
-                    print("Некорректный формат данных в open_maps.pkl")
-                    self.open_maps = []
+            # Нормализуем список: допускаем и строковые, и объектные записи
+            new_open = []
+            if isinstance(loaded_data, list):
+                for item in loaded_data:
+                    if isinstance(item, dict) and "id" in item and "name" in item:
+                        new_open.append(item)
+                    elif isinstance(item, str):
+                        new_open.append({"id": item, "name": item})
+            else:
+                # некорректный формат — игнорируем
+                new_open = []
+
+            self.open_maps = new_open
+
+            if not self.open_maps:
+                return
+
+            # Устанавливаем счётчик ожидаемых загрузок карт
+            self.maps_to_load = len(self.open_maps)
+            self.maps_loaded_data = {}
+
+            # Если ws подключён — начинаем загрузку, иначе отмечаем, что нужно загрузить при подключении
+            if self.ws_connected and self.ws_client and self.ws_client.isRunning():
+                for map_info in self.open_maps:
+                    self.open_map(map_info["id"], is_initial_load=True)
+                self.open_maps_loaded = True
+                print(f"Начата загрузка {len(self.open_maps)} открытых карт (WS ready)")
+            else:
+                # Отложенная загрузка — выполнится при on_ws_connected(True)
+                self.load_open_maps_pending = True
+                print(f"Список открытых карт подготовлен ({len(self.open_maps)}), ожидаем WS-подключения")
         except Exception as e:
             print(f"Ошибка загрузки открытых карт: {e}")
             self.open_maps = []
+
 
     def save_open_maps(self):
         """Сохраняет открытые карты в файл open_maps.pkl"""
