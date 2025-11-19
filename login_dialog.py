@@ -17,7 +17,7 @@ class WebSocketLoginClient(QThread):
     connected = pyqtSignal(bool)
     login_response = pyqtSignal(dict)
 
-    def __init__(self, uri="ws://127.0.0.1:8081"):
+    def __init__(self, uri="ws://192.168.0.56:8081"):
         super().__init__()
         self.uri = uri
         self.websocket = None
