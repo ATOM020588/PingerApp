@@ -19,7 +19,6 @@ from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF
 
 from widgets import SwitchInfoDialog, PlanSwitchInfoDialog, AddPlanedSwitch
 
-
 class MapCanvas(QGraphicsView):
     def __init__(self, map_data=None, parent=None):
         super().__init__(parent)
@@ -87,20 +86,36 @@ class MapCanvas(QGraphicsView):
         node["xy"]["x"] = x
         node["xy"]["y"] = y
 
+    # === НОВЫЙ МЕТОД: Установка данных карты ===
+    def set_map_data(self, map_data):
+        """ИСПРАВЛЕНО: Устанавливает данные карты и запускает рендеринг"""
+        if map_data and "map" in map_data:
+            self.map_data = map_data
+            self.is_data_loaded = True
+            # Обновляем размеры сцены
+            self.setSceneRect(0, 0, 
+                int(self.map_data["map"].get("width", "1200")), 
+                int(self.map_data["map"].get("height", "800")))
+            # Рендерим карту
+            self.render_map()
+        else:
+            print("Warning: Invalid map_data provided")
+            self.show_loading_indicator()
+
     # === ОТРИСОВКА ===
     def render_map(self):
         """ИСПРАВЛЕНО: Проверка наличия данных перед рендерингом"""
         print(f"Rendering map... Data loaded: {bool(self.map_data and 'map' in self.map_data)}")
-        
+
         # Проверяем, есть ли данные карты
         if not self.map_data or "map" not in self.map_data:
             self.show_loading_indicator()
             return
-        
+
         # Данные есть - убираем индикатор загрузки
         self.hide_loading_indicator()
         self.is_data_loaded = True
-        
+
         self.scene.clear()
         self.magistral_items = []
         self.node_items.clear()
@@ -230,7 +245,7 @@ class MapCanvas(QGraphicsView):
         if not self.loading_text_item:
             self.scene.clear()
             self.scene.setBackgroundBrush(QBrush(QColor("#008080")))
-            
+
             # Создаем текст "Загрузка..."
             self.loading_text_item = self.scene.addText("Загрузка данных карты...")
             self.loading_text_item.setDefaultTextColor(QColor("#FFC107"))
@@ -238,7 +253,7 @@ class MapCanvas(QGraphicsView):
             font.setPixelSize(24)
             font.setBold(True)
             self.loading_text_item.setFont(font)
-            
+
             # Центрируем текст
             rect = self.sceneRect()
             text_rect = self.loading_text_item.boundingRect()
@@ -740,16 +755,8 @@ class MapCanvas(QGraphicsView):
         menu.addAction("Удалить").triggered.connect(lambda: self.delete_plan_switch(node))
         menu.exec(self.mapToGlobal(position))
 
-    def show_hover_dialog(self):
-        if self.current_hover_node and self.current_hover_type == "switch":
-            SwitchInfoDialog(self.current_hover_node, self).exec()
-        elif self.current_hover_node and self.current_hover_type == "plan_switch":
-            PlanSwitchInfoDialog(self.current_hover_node, self).exec()
-        self.current_hover_node = None
-        self.current_hover_type = None
-
     def show_device_context_menu(self, position, node, ntype):
-        """Контекстное меню для оборудования (switch, user, soap)"""
+        """ИСПРАВЛЕНО: Контекстное меню для оборудования (switch, user, soap) с полным набором пунктов"""
         menu = QMenu(self)
         menu.setStyleSheet("""
             QMenu { background-color: #333; color: #FFC107; border: 1px solid #444; border-radius: 4px; padding: 4px; }
@@ -757,33 +764,64 @@ class MapCanvas(QGraphicsView):
             QMenu::item:selected { background-color: #555; }
             QMenu::item:disabled { color: #666; background-color: #333; }
         """)
+
+        # 1. Telnet
+        telnet_action = menu.addAction("Telnet")
+        telnet_action.triggered.connect(lambda: self.show_message("Telnet - функция в разработке"))
+
+        # 2. Редактировать
+        edit_action = menu.addAction("Редактировать")
+        edit_action.triggered.connect(lambda: self.show_message("Редактировать - функция в разработке"))
+
+        # 3. Добавить звонок (ПОДМЕНЮ с кнопками Свитч лежит и Порты с проблемами)
+        add_call_menu = menu.addMenu("Добавить звонок")
         
-        # Добавить звонок
-        add_call_action = menu.addAction("Добавить звонок")
-        add_call_action.triggered.connect(lambda: self.add_call_to_device(node, ntype))
+        # 3.1 Свитч лежит
+        switch_down_action = add_call_menu.addAction("Свитч лежит")
+        switch_down_action.triggered.connect(lambda: self.add_call_switch_down(node, ntype))
         
-        # Свитч лежит (добавить в глобальные неисправности)
-        add_issue_action = menu.addAction("Свитч лежит")
-        add_issue_action.triggered.connect(lambda: self.add_device_to_global_issues(node, ntype))
-        
-        # Порты с проблемами (пока отключено)
-        ports_action = menu.addAction("Порты с проблемами")
-        ports_action.setEnabled(False)
-        
+        # 3.2 Порты с проблемами
+        ports_issue_action = add_call_menu.addAction("Порты с проблемами")
+        ports_issue_action.triggered.connect(lambda: self.add_call_ports_issue(node, ntype))
+
+        # 4. Найти в глоб репорте
+        find_report_action = menu.addAction("Найти в глоб репорте")
+        find_report_action.triggered.connect(lambda: self.show_message("Найти в глоб репорте - функция в разработке"))
+
+        # 5. Ping
+        ping_action = menu.addAction("Ping")
+        ping_action.triggered.connect(lambda: self.show_message("Ping - функция в разработке"))
+
+        # 6. Flood ping
+        flood_ping_action = menu.addAction("Flood ping")
+        flood_ping_action.triggered.connect(lambda: self.show_message("Flood ping - функция в разработке"))
+
+        # 7. Режим DHCP
+        dhcp_action = menu.addAction("Режим DHCP")
+        dhcp_action.triggered.connect(lambda: self.show_message("Режим DHCP - функция в разработке"))
+
+        # 8. Заявки
+        tickets_action = menu.addAction("Заявки")
+        tickets_action.triggered.connect(lambda: self.show_message("Заявки - функция в разработке"))
+
+        # 9. Замена свитча
+        replace_action = menu.addAction("Замена свитча")
+        replace_action.triggered.connect(lambda: self.show_message("Замена свитча - функция в разработке"))
+
+        # 10. История
+        history_action = menu.addAction("История")
+        history_action.triggered.connect(lambda: self.show_message("История - функция в разработке"))
+
+        # 11. Удалить свитч
+        delete_action = menu.addAction("Удалить свитч")
+        delete_action.triggered.connect(lambda: self.show_message("Удалить свитч - функция в разработке"))
+
         menu.exec(self.mapToGlobal(position))
-    
-    def add_call_to_device(self, node, ntype):
-        """Добавить звонок к устройству (пока просто открывает диалог глобальных неисправностей)"""
-        if hasattr(self.parent, "show_global_issues_dialog"):
-            self.parent.show_global_issues_dialog()
-            self.show_message("Добавьте звонок в окне глобальных неисправностей")
-        else:
-            self.show_message("Функция недоступна")
-    
-    def add_device_to_global_issues(self, node, ntype):
-        """Добавляет устройство в глобальные неисправности"""
-        from globals_dialog import GlobalIssuesDialog
-        
+
+    def add_call_switch_down(self, node, ntype):
+        """Добавить звонок: Свитч лежит"""
+        from globals_dialog import AddCallDialog
+
         # Подготавливаем информацию об устройстве
         device_info = {
             "type": ntype,
@@ -791,12 +829,53 @@ class MapCanvas(QGraphicsView):
             "name": node.get("name", "Неизвестно"),
             "ip": node.get("ip", "Нет IP")
         }
-        
-        # Открываем диалог глобальных неисправностей
+
+        # Открываем диалог добавления звонка с информацией об устройстве
         if hasattr(self.parent, "ws_client"):
-            dialog = GlobalIssuesDialog(self.parent, self.parent.ws_client)
-            # Сразу открываем форму добавления с информацией об устройстве
-            dialog.add_issue(device_info=device_info)
-            dialog.exec()
+            dialog = AddCallDialog(self.parent, device_info=device_info, ws_client=self.parent.ws_client)
+            
+            # Автоматически заполняем информацию "Свитч лежит"
+            device_name = device_info.get("name", "Неизвестно")
+            device_ip = device_info.get("ip", "Нет IP")
+            dialog.info_input.setPlainText(f"СВИТЧ ЛЕЖИТ: {device_ip} ({device_name})")
+            
+            if dialog.exec():
+                call_data = dialog.get_data()
+                self.show_message(f"Звонок добавлен: Свитч лежит - {device_name}")
         else:
             self.show_message("Нет связи с сервером")
+
+    def add_call_ports_issue(self, node, ntype):
+        """Добавить звонок: Порты с проблемами"""
+        from globals_dialog import AddCallDialog
+
+        # Подготавливаем информацию об устройстве
+        device_info = {
+            "type": ntype,
+            "id": node.get("id", ""),
+            "name": node.get("name", "Неизвестно"),
+            "ip": node.get("ip", "Нет IP")
+        }
+
+        # Открываем диалог добавления звонка с информацией об устройстве
+        if hasattr(self.parent, "ws_client"):
+            dialog = AddCallDialog(self.parent, device_info=device_info, ws_client=self.parent.ws_client)
+            
+            # Автоматически заполняем информацию "Порты с проблемами"
+            device_name = device_info.get("name", "Неизвестно")
+            device_ip = device_info.get("ip", "Нет IP")
+            dialog.info_input.setPlainText(f"ПОРТЫ С ПРОБЛЕМАМИ: {device_ip} ({device_name})")
+            
+            if dialog.exec():
+                call_data = dialog.get_data()
+                self.show_message(f"Звонок добавлен: Порты с проблемами - {device_name}")
+        else:
+            self.show_message("Нет связи с сервером")
+
+    def show_hover_dialog(self):
+        if self.current_hover_node and self.current_hover_type == "switch":
+            SwitchInfoDialog(self.current_hover_node, self).exec()
+        elif self.current_hover_node and self.current_hover_type == "plan_switch":
+            PlanSwitchInfoDialog(self.current_hover_node, self).exec()
+        self.current_hover_node = None
+        self.current_hover_type = None

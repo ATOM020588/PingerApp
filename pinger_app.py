@@ -899,6 +899,113 @@ class MainWindow(QMainWindow):
         """Показывает диалог глобальных неисправностей"""
         dialog = GlobalIssuesDialog(self, self.ws_client)
         dialog.exec()
+    
+    def show_server_settings_dialog(self):
+        """Показывает диалог настройки адреса сервера"""
+        dialog = ServerSettingsDialog(self, self.ws_client)
+        if dialog.exec():
+            new_uri = dialog.get_server_uri()
+            if new_uri:
+                # Останавливаем текущее подключение
+                self.ws_client.stop()
+                self.ws_client.wait()
+                
+                # Создаем новое подключение с новым адресом
+                self.ws_client = WebSocketClient(uri=new_uri)
+                self.ws_client.connected.connect(self.on_ws_connected)
+                self.ws_client.message_received.connect(self.on_ws_message)
+                self.ws_client.start()
+                
+                self.status_bar.showMessage(f"Подключение к {new_uri}...", 3000)
+    
+    def keyPressEvent(self, event):
+        """Обработка горячих клавиш"""
+        # CTRL+G - Открыть глобальные неисправности
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            if event.key() == Qt.Key.Key_G:
+                self.show_global_issues_dialog()
+                event.accept()
+                return
+            # CTRL+O - Настройка сервера
+            elif event.key() == Qt.Key.Key_O:
+                self.show_server_settings_dialog()
+                event.accept()
+                return
+        
+        super().keyPressEvent(event)
+
+
+class ServerSettingsDialog(QDialog):
+    """Диалог настройки адреса сервера"""
+    def __init__(self, parent=None, ws_client=None):
+        super().__init__(parent)
+        self.setWindowTitle("Настройка сервера")
+        self.setFixedSize(450, 180)
+        self.ws_client = ws_client
+        
+        layout = QVBoxLayout()
+        
+        # Заголовок
+        title = QLabel("Укажите адрес WebSocket сервера")
+        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFC107; padding: 10px;")
+        layout.addWidget(title)
+        
+        # Поле ввода адреса
+        layout.addWidget(QLabel("Адрес сервера (например, ws://127.0.0.1:8081):"))
+        self.server_input = QLineEdit()
+        
+        # Получаем текущий адрес из ws_client
+        if ws_client:
+            self.server_input.setText(ws_client.uri)
+        else:
+            self.server_input.setText("ws://127.0.0.1:8081")
+        
+        self.server_input.setPlaceholderText("ws://IP:PORT")
+        layout.addWidget(self.server_input)
+        
+        # Кнопки
+        buttons = QHBoxLayout()
+        ok_button = QPushButton("Применить")
+        cancel_button = QPushButton("Отмена")
+        
+        ok_button.clicked.connect(self.accept)
+        cancel_button.clicked.connect(self.reject)
+        
+        buttons.addWidget(ok_button)
+        buttons.addWidget(cancel_button)
+        layout.addLayout(buttons)
+        
+        self.setLayout(layout)
+        self.setStyleSheet("""
+            QDialog { background-color: #333; color: #FFC107; border: 1px solid #FFC107; }
+            QLabel { color: #FFC107; }
+            QLineEdit { 
+                background-color: #444; 
+                color: #FFC107; 
+                border: 1px solid #555; 
+                border-radius: 4px; 
+                padding: 8px; 
+                font-size: 13px;
+            }
+            QPushButton { 
+                background-color: #444; 
+                color: #FFC107; 
+                border: 1px solid #555; 
+                border-radius: 4px; 
+                padding: 10px 20px; 
+            }
+            QPushButton:hover { background-color: #555; }
+        """)
+    
+    def get_server_uri(self):
+        """Возвращает введенный адрес сервера"""
+        uri = self.server_input.text().strip()
+        # Базовая валидация
+        if not uri.startswith("ws://") and not uri.startswith("wss://"):
+            QMessageBox.warning(self, "Ошибка", "Адрес должен начинаться с ws:// или wss://")
+            return None
+        return uri
+
 
 def main():
     app = QApplication(sys.argv)
