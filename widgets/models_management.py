@@ -3,16 +3,16 @@
 
 import os
 import json
+import base64
 import shutil
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, QFormLayout,
     QLineEdit, QCheckBox, QComboBox, QTextEdit, QPushButton,
-    QWidget, QFileDialog, QApplication
+    QWidget, QFileDialog
 )
 from PyQt6.QtGui import QPixmap
-from PyQt6.QtCore import Qt, QTimer
-
+from PyQt6.QtCore import Qt
 
 class ModelsManagementDialog(QDialog):
     def __init__(self, parent=None):
@@ -20,20 +20,18 @@ class ModelsManagementDialog(QDialog):
         self.setWindowTitle("Управление моделями")
         self.setFixedSize(1350, 900)
 
-        # Пути
-        self.models_path = os.path.join("models", "models.json")
-        self.models_dir = "models"
-        self.images_dir = "images"
-        self.firmware_path = os.path.join("lists", "firmware.json")
-
-        # Данные
+        # Состояние
         self.selected_model_id = None
         self.current_syntax_data = {}
         self.selected_syntax_type = None
         self.firmware_data = []
         self.image_path = None
 
+        # UI-инициализация
         self.init_ui()
+
+        # Загружаем сначала прошивки (они используются в форме), затем список моделей
+        self.load_firmware_options()
         self.load_models()
 
     def init_ui(self):
@@ -103,7 +101,7 @@ class ModelsManagementDialog(QDialog):
         self.ports_count = QLineEdit()
         self.mag_ports = QLineEdit()
         self.firmware = QComboBox()
-        self.load_firmware_options()
+        self.firmware.addItem("")  # будет заполнено в load_firmware_options()
         form_layout.addRow(QLabel("Имя:"), self.model_name)
         form_layout.addRow(QLabel("OLT:"), self.olt)
         form_layout.addRow(QLabel("Neobills:"), self.neobills)
@@ -111,7 +109,6 @@ class ModelsManagementDialog(QDialog):
         form_layout.addRow(QLabel("Кол-во портов:"), self.ports_count)
         form_layout.addRow(QLabel("Маг. порты:"), self.mag_ports)
         form_layout.addRow(QLabel("Прошивка:"), self.firmware)
-        #form_layout.addWidget(QLabel("Предпросмотр картинки"))
         form_widget.setLayout(form_layout)
         details_column.addWidget(form_widget)
 
@@ -213,78 +210,266 @@ class ModelsManagementDialog(QDialog):
         """)
 
     # --------------------------------------------------------------------- #
-    # Данные
+    # Работа с сервера через WebSocket
     # --------------------------------------------------------------------- #
     def load_firmware_options(self):
-        try:
-            if not os.path.exists(self.firmware_path):
-                self.parent().show_toast(f"Файл прошивок не найден: {self.firmware_path}", "error")
+        """Запрашивает список прошивок с сервера (data/lists/firmware.json)"""
+        parent = self.parent()
+        if not parent or not getattr(parent, "ws_connected", False):
+            if parent:
+                parent.show_toast("Нет связи с сервером", "error")
+            return
+
+        req = parent.ws_client.send_request("list_firmwares")
+
+        def on_resp(data):
+            if not data.get("success"):
+                parent.show_toast("Ошибка загрузки прошивок", "error")
                 return
-            with open(self.firmware_path, "r", encoding="utf-8") as f:
-                self.firmware_data = json.load(f)
+
+            self.firmware_data = data.get("firmwares", [])
             self.firmware.clear()
             self.firmware.addItem("")
             for item in self.firmware_data:
                 if "model_name" in item:
                     self.firmware.addItem(item["model_name"])
-        except Exception as e:
-            self.parent().show_toast(f"Ошибка загрузки прошивок: {str(e)}", "error")
+
+        parent.pending_requests[req] = on_resp
 
     def load_models(self):
-        try:
-            os.makedirs(self.models_dir, exist_ok=True)
-            if not os.path.exists(self.models_path):
-                with open(self.models_path, "w", encoding="utf-8") as f:
-                    json.dump([], f, ensure_ascii=False, indent=4)
-            with open(self.models_path, "r", encoding="utf-8") as f:
-                models = json.load(f)
+        """Запрашивает список моделей с сервера (data/models/models.json)"""
+        parent = self.parent()
+        if not parent or not getattr(parent, "ws_connected", False):
+            if parent:
+                parent.show_toast("Нет связи с сервером", "error")
+            return
+
+        req = parent.ws_client.send_request("list_models")
+
+        def on_resp(data):
+            if not data.get("success"):
+                parent.show_toast("Ошибка загрузки списка моделей", "error")
+                return
+
+            models = data.get("models", [])
             self.models_list.clear()
             for model in models:
-                item = self.models_list.addItem(model["model_name"])
+                self.models_list.addItem(model["model_name"])
                 self.models_list.item(self.models_list.count() - 1).setData(Qt.ItemDataRole.UserRole, model["id"])
-        except Exception as e:
-            self.parent().show_toast(f"Ошибка загрузки списка моделей: {str(e)}", "error")
 
-    # --------------------------------------------------------------------- #
-    # Обработчики
-    # --------------------------------------------------------------------- #
+        parent.pending_requests[req] = on_resp
+
     def on_model_selected(self, item):
+        """Загружает выбранную модель с сервера (data/models/<id>.json)"""
+        parent = self.parent()
         self.selected_model_id = item.data(Qt.ItemDataRole.UserRole)
-        model_path = os.path.join(self.models_dir, f"{self.selected_model_id}.json")
-        try:
-            if not os.path.exists(model_path):
-                self.parent().show_toast(f"Файл модели не найден: {model_path}", "error")
-                return
-            with open(model_path, "r", encoding="utf-8") as f:
-                model = json.load(f)
+        if not parent or not getattr(parent, "ws_connected", False):
+            parent.show_toast("Нет связи с сервером", "error")
+            return
 
+        req = parent.ws_client.send_request("load_model", id=self.selected_model_id)
+
+        def on_resp(data):
+            if not data.get("success"):
+                parent.show_toast("Ошибка загрузки модели", "error")
+                return
+
+            model = data.get("model", {})
+
+            # Заполняем форму
             self.model_name.setText(model.get("model_name", ""))
             self.olt.setChecked(model.get("olt", False))
             self.neobills.setCurrentText(model.get("neobills", ""))
             self.uplink.setText(model.get("uplink", ""))
             self.ports_count.setText(model.get("ports_count", ""))
             self.mag_ports.setText(model.get("mag_ports", ""))
+
             firmware = model.get("firmware", {})
             if isinstance(firmware, dict) and "model_name" in firmware:
                 self.firmware.setCurrentText(firmware["model_name"])
             else:
-                self.firmware.setCurrentText("")
+                self.firmware.setCurrentIndex(0)
 
             self.current_syntax_data = model.get("syntax", {})
             self.syntax_info_text.setPlainText("")
             self.syntax_list.clearSelection()
             self.selected_syntax_type = None
 
-            image = model.get("image", "")
-            if image and os.path.exists(os.path.join(self.images_dir, image)):
-                pixmap = QPixmap(os.path.join(self.images_dir, image))
-                self.preview_image.setPixmap(pixmap.scaled(360, 300, Qt.AspectRatioMode.KeepAspectRatio))
-                self.image_path = os.path.join(self.images_dir, image)
+            image_name = model.get("image", "")
+            if image_name:
+                # Запрос изображения с сервера
+                self.download_image_from_server(image_name)
             else:
                 self.preview_image.clear()
-                self.image_path = None
+
+        parent.pending_requests[req] = on_resp
+
+    def download_image_from_server(self, filename):
+        """Запрашивает изображение (Base64) и отображает его"""
+        parent = self.parent()
+        if not parent or not getattr(parent, "ws_connected", False):
+            return
+
+        req = parent.ws_client.send_request("download_image", filename=filename)
+
+        def on_resp(data):
+            if not data.get("success"):
+                self.preview_image.clear()
+                return
+
+            b64 = data.get("image")
+            if not b64:
+                self.preview_image.clear()
+                return
+
+            try:
+                img_bytes = base64.b64decode(b64)
+                pixmap = QPixmap()
+                pixmap.loadFromData(img_bytes)
+                self.preview_image.setPixmap(pixmap.scaled(360, 300, Qt.AspectRatioMode.KeepAspectRatio))
+            except Exception:
+                self.preview_image.clear()
+
+        parent.pending_requests[req] = on_resp
+
+    def upload_image_file(self):
+        """Выбор изображения локально — картинка будет загружена на сервер при сохранении/добавлении модели"""
+        file_path, _ = QFileDialog.getOpenFileName(self, "Выберите изображение", "", "Images (*.png *.jpg *.jpeg)")
+        if file_path:
+            self.image_path = file_path
+            pixmap = QPixmap(file_path)
+            self.preview_image.setPixmap(pixmap.scaled(360, 300, Qt.AspectRatioMode.KeepAspectRatio))
+
+    def upload_image_to_server(self, filename):
+        """Отправляет изображение в base64 на сервер (upload_image)"""
+        parent = self.parent()
+        if not parent or not getattr(parent, "ws_connected", False):
+            parent.show_toast("Нет связи с сервером", "error")
+            return
+
+        try:
+            with open(self.image_path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode()
+
+            # fire-and-forget, сервер сохранит файл
+            parent.ws_client.send_request("upload_image", filename=filename, image=b64)
         except Exception as e:
-            self.parent().show_toast(f"Ошибка загрузки модели: {str(e)}", "error")
+            parent.show_toast(f"Ошибка загрузки изображения: {str(e)}", "error")
+
+    def add_model(self):
+        parent = self.parent()
+        if not self.model_name.text():
+            parent.show_toast("Заполните имя модели", "error")
+            return
+
+        model_id = f"model_{self.model_name.text().replace(' ', '_')}"
+        selected_fw = self.firmware.currentText()
+        fw_data = next((x for x in self.firmware_data if x.get("model_name") == selected_fw), {})
+
+        model_data = {
+            "id": model_id,
+            "model_name": self.model_name.text(),
+            "olt": self.olt.isChecked(),
+            "neobills": self.neobills.currentText(),
+            "uplink": self.uplink.text(),
+            "ports_count": self.ports_count.text(),
+            "mag_ports": self.mag_ports.text(),
+            "firmware": fw_data,
+            "syntax": self.current_syntax_data,
+        }
+
+        # изображение: загружаем на сервер и указываем имя в модели
+        if self.image_path:
+            ext = os.path.splitext(self.image_path)[1]
+            img_name = f"{model_id}{ext}"
+            model_data["image"] = img_name
+            self.upload_image_to_server(img_name)
+
+        if not parent or not getattr(parent, "ws_connected", False):
+            if parent:
+                parent.show_toast("Нет связи с сервером", "error")
+            return
+
+        req = parent.ws_client.send_request("save_model", id=model_id, model=model_data)
+
+        def on_resp(data):
+            if data.get("success"):
+                parent.show_toast("Модель добавлена", "success")
+                self.load_models()
+                self.reset_form()
+            else:
+                parent.show_toast(f"Ошибка добавления модели: {data.get('error')}", "error")
+
+        parent.pending_requests[req] = on_resp
+
+    def save_model_changes(self):
+        parent = self.parent()
+        if not self.selected_model_id:
+            parent.show_toast("Выберите модель", "error")
+            return
+        if not self.model_name.text():
+            parent.show_toast("Заполните имя модели", "error")
+            return
+
+        selected_fw = self.firmware.currentText()
+        fw_data = next((x for x in self.firmware_data if x.get("model_name") == selected_fw), {})
+
+        model_data = {
+            "id": self.selected_model_id,
+            "model_name": self.model_name.text(),
+            "olt": self.olt.isChecked(),
+            "neobills": self.neobills.currentText(),
+            "uplink": self.uplink.text(),
+            "ports_count": self.ports_count.text(),
+            "mag_ports": self.mag_ports.text(),
+            "firmware": fw_data,
+            "syntax": self.current_syntax_data
+        }
+
+        # изображение: загружаем на сервер и указываем имя в модели
+        if self.image_path:
+            ext = os.path.splitext(self.image_path)[1]
+            img_name = f"{self.selected_model_id}{ext}"
+            model_data["image"] = img_name
+            self.upload_image_to_server(img_name)
+
+        if not parent or not getattr(parent, "ws_connected", False):
+            parent.show_toast("Нет связи с сервером", "error")
+            return
+
+        req = parent.ws_client.send_request("save_model", id=self.selected_model_id, model=model_data)
+
+        def on_resp(data):
+            if data.get("success"):
+                parent.show_toast("Модель обновлена", "success")
+                self.load_models()
+                self.reset_form()
+            else:
+                parent.show_toast(f"Ошибка обновления модели: {data.get('error')}", "error")
+
+        parent.pending_requests[req] = on_resp
+
+    def delete_model(self):
+        parent = self.parent()
+        if not self.selected_model_id:
+            parent.show_toast("Выберите модель", "error")
+            return
+
+        if not parent or not getattr(parent, "ws_connected", False):
+            parent.show_toast("Нет связи с сервером", "error")
+            return
+
+        req = parent.ws_client.send_request("delete_model", id=self.selected_model_id)
+
+        def on_resp(data):
+            if data.get("success"):
+                parent.show_toast("Модель удалена", "success")
+                self.load_models()
+                self.reset_form()
+            else:
+                parent.show_toast(f"Ошибка удаления модели: {data.get('error')}", "error")
+
+        parent.pending_requests[req] = on_resp
 
     def on_syntax_type_selected(self, item):
         self.selected_syntax_type = item.text()
@@ -294,163 +479,47 @@ class ModelsManagementDialog(QDialog):
             return
         self.syntax_info_text.setPlainText(self.current_syntax_data.get(self.selected_syntax_type, ""))
 
-    def upload_image_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Выберите изображение", "", "Images (*.png *.jpg *.jpeg)")
-        if file_path:
-            self.image_path = file_path
-            pixmap = QPixmap(file_path)
-            self.preview_image.setPixmap(pixmap.scaled(360, 300, Qt.AspectRatioMode.KeepAspectRatio))
-
-    def add_model(self):
-        if not self.model_name.text():
-            self.parent().show_toast("Заполните имя модели", "error")
-            return
-
-        model_id = f"model_{self.model_name.text().replace(' ', '_')}"
-        selected_firmware_name = self.firmware.currentText()
-        firmware_data = next((item for item in self.firmware_data if item.get("model_name") == selected_firmware_name), {}) if selected_firmware_name else {}
-
-        model_data = {
-            "id": model_id,
-            "model_name": self.model_name.text(),
-            "olt": self.olt.isChecked(),
-            "neobills": self.neobills.currentText(),
-            "uplink": self.uplink.text(),
-            "ports_count": self.ports_count.text(),
-            "mag_ports": self.mag_ports.text(),
-            "firmware": firmware_data,
-            "syntax": self.current_syntax_data
-        }
-
-        if self.image_path:
-            image_ext = os.path.splitext(self.image_path)[1]
-            image_name = f"{model_id}{image_ext}"
-            model_data["image"] = image_name
-            os.makedirs(self.images_dir, exist_ok=True)
-            destination = os.path.join(self.images_dir, image_name)
-            if self.image_path != destination:
-                shutil.copy(self.image_path, destination)
-
-        try:
-            with open(self.models_path, "r", encoding="utf-8") as f:
-                models = json.load(f)
-            if any(m["id"] == model_id for m in models):
-                self.parent().show_toast("Модель с таким именем уже существует", "error")
-                return
-            models.append({"id": model_id, "model_name": self.model_name.text()})
-            with open(self.models_path, "w", encoding="utf-8") as f:
-                json.dump(models, f, ensure_ascii=False, indent=4)
-
-            os.makedirs(self.models_dir, exist_ok=True)
-            with open(os.path.join(self.models_dir, f"{model_id}.json"), "w", encoding="utf-8") as f:
-                json.dump(model_data, f, ensure_ascii=False, indent=4)
-
-            self.parent().show_toast("Модель добавлена", "success")
-            self.load_models()
-            self.reset_form()
-        except Exception as e:
-            self.parent().show_toast(f"Ошибка добавления модели: {str(e)}", "error")
-
-    def save_model_changes(self):
-        if not self.selected_model_id:
-            self.parent().show_toast("Выберите модель для редактирования", "error")
-            return
-        if not self.model_name.text():
-            self.parent().show_toast("Заполните имя модели", "error")
-            return
-
-        model_id = self.selected_model_id
-        selected_firmware_name = self.firmware.currentText()
-        firmware_data = next((item for item in self.firmware_data if item.get("model_name") == selected_firmware_name), {}) if selected_firmware_name else {}
-
-        model_data = {
-            "id": model_id,
-            "model_name": self.model_name.text(),
-            "olt": self.olt.isChecked(),
-            "neobills": self.neobills.currentText(),
-            "uplink": self.uplink.text(),
-            "ports_count": self.ports_count.text(),
-            "mag_ports": self.mag_ports.text(),
-            "firmware": firmware_data,
-            "syntax": self.current_syntax_data
-        }
-
-        if self.image_path:
-            image_ext = os.path.splitext(self.image_path)[1]
-            image_name = f"{model_id}{image_ext}"
-            model_data["image"] = image_name
-            os.makedirs(self.images_dir, exist_ok=True)
-            destination = os.path.join(self.images_dir, image_name)
-            if self.image_path != destination:
-                shutil.copy(self.image_path, destination)
-
-        try:
-            with open(self.models_path, "r", encoding="utf-8") as f:
-                models = json.load(f)
-            for model in models:
-                if model["id"] == model_id:
-                    model["model_name"] = self.model_name.text()
-                    break
-            with open(self.models_path, "w", encoding="utf-8") as f:
-                json.dump(models, f, ensure_ascii=False, indent=4)
-
-            with open(os.path.join(self.models_dir, f"{model_id}.json"), "w", encoding="utf-8") as f:
-                json.dump(model_data, f, ensure_ascii=False, indent=4)
-
-            self.parent().show_toast("Модель обновлена", "success")
-            self.load_models()
-            self.reset_form()
-        except Exception as e:
-            self.parent().show_toast(f"Ошибка обновления модели: {str(e)}", "error")
-
-    def delete_model(self):
-        if not self.selected_model_id:
-            self.parent().show_toast("Выберите модель для удаления", "error")
-            return
-
-        model_path = os.path.join(self.models_dir, f"{self.selected_model_id}.json")
-        try:
-            with open(self.models_path, "r", encoding="utf-8") as f:
-                models = json.load(f)
-            models = [m for m in models if m["id"] != self.selected_model_id]
-            with open(self.models_path, "w", encoding="utf-8") as f:
-                json.dump(models, f, ensure_ascii=False, indent=4)
-
-            if os.path.exists(model_path):
-                os.remove(model_path)
-
-            self.parent().show_toast("Модель удалена", "success")
-            self.load_models()
-            self.reset_form()
-        except Exception as e:
-            self.parent().show_toast(f"Ошибка удаления модели: {str(e)}", "error")
-
     def save_syntax(self):
+        parent = self.parent()
         if not self.selected_syntax_type:
-            self.parent().show_toast("Выберите тип синтаксиса", "error")
+            parent.show_toast("Выберите тип синтаксиса", "error")
             return
         if not self.selected_model_id:
-            self.parent().show_toast("Выберите модель для редактирования", "error")
+            parent.show_toast("Выберите модель", "error")
             return
 
+        # Обновляем локально, затем сохраняем модель на сервер
         self.current_syntax_data[self.selected_syntax_type] = self.syntax_info_text.toPlainText()
-        model_path = os.path.join(self.models_dir, f"{self.selected_model_id}.json")
-        try:
-            if not os.path.exists(model_path):
-                self.parent().show_toast(f"Файл модели не найден: {model_path}", "error")
-                return
-            with open(model_path, "r", encoding="utf-8") as f:
-                model_data = json.load(f)
-            model_data["syntax"] = self.current_syntax_data
-            with open(model_path, "w", encoding="utf-8") as f:
-                json.dump(model_data, f, ensure_ascii=False, indent=4)
 
-            self.parent().show_toast("Синтаксис обновлен", "success")
-            self.syntax_info_text.setPlainText("")
-            self.syntax_list.clearSelection()
-            self.selected_syntax_type = None
-        except Exception as e:
-            self.parent().show_toast(f"Ошибка сохранения синтаксиса: {str(e)}", "error")
+        if not parent or not getattr(parent, "ws_connected", False):
+            parent.show_toast("Нет связи с сервером", "error")
+            return
+
+        # Загружаем текущую модель, обновляем и сохраняем
+        req = parent.ws_client.send_request("load_model", id=self.selected_model_id)
+
+        def on_loaded(data):
+            if not data.get("success"):
+                parent.show_toast("Ошибка загрузки модели для сохранения синтаксиса", "error")
+                return
+
+            mdl = data.get("model", {})
+            mdl["syntax"] = self.current_syntax_data
+
+            req2 = parent.ws_client.send_request("save_model", id=self.selected_model_id, model=mdl)
+
+            def on_saved(resp):
+                if resp.get("success"):
+                    parent.show_toast("Синтаксис сохранён", "success")
+                    self.syntax_info_text.setPlainText("")
+                    self.syntax_list.clearSelection()
+                    self.selected_syntax_type = None
+                else:
+                    parent.show_toast(f"Ошибка сохранения синтаксиса: {resp.get('error')}", "error")
+
+            parent.pending_requests[req2] = on_saved
+
+        parent.pending_requests[req] = on_loaded
 
     def reset_form(self):
         self.model_name.clear()

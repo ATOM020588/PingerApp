@@ -874,8 +874,8 @@ class MapCanvas(QGraphicsView):
 
     def show_hover_dialog(self):
         if self.current_hover_node and self.current_hover_type == "switch":
-            SwitchInfoDialog(self.current_hover_node, self).exec()
+            SwitchInfoDialog(self.current_hover_node, self.parent).exec()
         elif self.current_hover_node and self.current_hover_type == "plan_switch":
-            PlanSwitchInfoDialog(self.current_hover_node, self).exec()
+            PlanSwitchInfoDialog(self.current_hover_node, self.parent).exec()
         self.current_hover_node = None
         self.current_hover_type = None

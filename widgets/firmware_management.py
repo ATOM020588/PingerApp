@@ -72,20 +72,26 @@ class FirmwareManagementDialog(QDialog):
         """)
 
     def load_models(self):
-        model_file = "models/models.json"
-        os.makedirs(os.path.dirname(model_file), exist_ok=True)
-        try:
-            if os.path.exists(model_file):
-                with open(model_file, "r", encoding="utf-8") as f:
-                    self.models = json.load(f)
-            else:
-                self.models = []
-            self.update_model_list()
-        except json.JSONDecodeError as e:
-            print(f"Ошибка формата JSON в {model_file}: {str(e)}")
-            self.show_toast(f"Ошибка формата JSON в файле моделей: {str(e)}", "error")
+        if not self.parent().ws_connected:
             self.models = []
             self.update_model_list()
+            return
+
+        req = self.parent().ws_client.send_request("list_models")
+
+        def on_resp(data):
+            if data.get("success"):
+                self.models = data.get("models", [])
+            else:
+                self.models = []
+
+            self.update_model_list()
+
+            # Загружать прошивки ТОЛЬКО ПОСЛЕ моделей
+            self.load_firmwares()
+
+        self.parent().pending_requests[req] = on_resp
+
 
     def update_model_list(self):
         self.model_list.clear()
@@ -95,18 +101,25 @@ class FirmwareManagementDialog(QDialog):
                 self.model_list.setCurrentRow(self.models.index(model))
 
     def load_firmwares(self):
-        firmware_file = "lists/firmware.json"
-        os.makedirs(os.path.dirname(firmware_file), exist_ok=True)
-        try:
-            if os.path.exists(firmware_file):
-                with open(firmware_file, "r", encoding="utf-8") as f:
-                    self.firmwares = json.load(f)
+        if not self.parent().ws_connected:
+            self.firmwares = []
+            return
+
+        req = self.parent().ws_client.send_request("list_firmwares")
+
+        def on_resp(data):
+            if data.get("success"):
+                self.firmwares = data.get("firmwares", [])
             else:
                 self.firmwares = []
-        except json.JSONDecodeError as e:
-            print(f"Ошибка формата JSON в {firmware_file}: {str(e)}")
-            self.parent().show_toast(f"Ошибка формата JSON в файле прошивок: {str(e)}", "error")
-            self.firmwares = []
+
+            # если модель уже выбрана — обновить текст
+            current = self.model_list.currentItem()
+            if current:
+                self.update_firmware_text(current)
+
+        self.parent().pending_requests[req] = on_resp
+
 
     def update_firmware_text(self, item):
         model_name = item.text()
@@ -147,11 +160,13 @@ class FirmwareManagementDialog(QDialog):
             self.show_toast("Ошибка: модель не найдена", "error")
 
     def save_firmware_list(self):
-        firmware_file = "lists/firmware.json"
-        os.makedirs(os.path.dirname(firmware_file), exist_ok=True)
-        try:
-            with open(firmware_file, "w", encoding="utf-8") as f:
-                json.dump(self.firmwares, f, ensure_ascii=False, indent=4)
-        except Exception as e:
-            print(f"Ошибка сохранения прошивок: {str(e)}")
-            self.show_toast(f"Ошибка сохранения прошивок: {str(e)}", "error")
+        if not self.parent().ws_connected:
+            self.show_toast("Нет связи с сервером", "error")
+            return
+
+        req = self.parent().ws_client.send_request(
+            "save_firmwares",
+            firmwares=self.firmwares
+        )
+
+        self.parent().pending_requests[req] = lambda data: None
