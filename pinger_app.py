@@ -107,16 +107,23 @@ class MapNameDialog(QDialog):
             QLabel { color: #FFC107; }
         """)
 
+
 class OpenMapDialog(QDialog):
     def __init__(self, parent=None, map_files=None, ws_client=None):
         super().__init__(parent)
         self.setWindowTitle("Открыть карту")
         self.setFixedSize(785, 400)
-        self.map_files = map_files or []
-        self.ws_client = ws_client
+
         self.parent_window = parent
-        
+        self.ws_client = ws_client or getattr(parent, "ws_client", None)
+
+        # If map_files passed from caller, use them; otherwise will request from server
+        self.map_files = map_files or []      # names like "map_TESTS.json"
+        self.map_info = {}       # {filename: {"mod_time": "...", "last_adm": "..."}}
+
         layout = QVBoxLayout()
+
+        # === Таблица ===
         self.table = QTableWidget()
         self.table.setColumnCount(3)
         self.table.setHorizontalHeaderLabels(["Название", "Дата и время изменения", "Последние изменения"])
@@ -126,12 +133,15 @@ class OpenMapDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.populate_table()
+
         layout.addWidget(QLabel("Выберите карту"))
         layout.addWidget(self.table)
+
         self.error_label = QLabel()
         self.error_label.setStyleSheet("color: #FFC107;")
         layout.addWidget(self.error_label)
+
+        # === Кнопки ===
         buttons = QHBoxLayout()
         ok_button = QPushButton("ОК")
         cancel_button = QPushButton("Отмена")
@@ -140,7 +150,10 @@ class OpenMapDialog(QDialog):
         buttons.addWidget(ok_button)
         buttons.addWidget(cancel_button)
         layout.addLayout(buttons)
+
         self.setLayout(layout)
+
+        # === Стили ===
         self.setStyleSheet("""
             QDialog { background-color: #333; color: #FFC107; border: 1px solid #FFC107; }
             QTableWidget { background-color: #444; color: #FFC107; border: 1px solid #555; }
@@ -152,13 +165,96 @@ class OpenMapDialog(QDialog):
             QLabel { color: #FFC107; }
         """)
 
+        # If map_files were provided when creating the dialog, use them; otherwise request from server
+        if self.map_files:
+            # Kick off loading details for provided files
+            for filename in self.map_files:
+                # ensure filename is exactly what server sent (do not add/remove map_)
+                path = f"maps/{filename}"
+                req_id = None
+                if self.ws_client:
+                    req_id = self.ws_client.send_request("file_get", path=path)
+                if req_id and self.parent_window:
+                    self.parent_window.pending_requests[req_id] = (lambda d, fn=filename: self.on_map_details(fn, d))
+                else:
+                    # If WS not available, leave empty info and populate table
+                    self.map_info[filename] = {"mod_time": "", "last_adm": ""}
+            # If no ws_client or pending requests were set, populate table now (will refresh later as data arrives)
+            if not self.ws_client:
+                self.populate_table()
+        else:
+            # Will request the list from server
+            self.load_maps_from_server()
+
+    # ==============================
+    #   ЗАГРУЗКА СПИСКА КАРТ
+    # ==============================
+    def load_maps_from_server(self):
+        if not self.ws_client:
+            self.error_label.setText("Ошибка: нет подключения WS-клиента")
+            return
+
+        req_id = self.ws_client.send_request("list_maps")
+        if self.parent_window is not None:
+            self.parent_window.pending_requests[req_id] = self.on_maps_list_received
+
+    def on_maps_list_received(self, data):
+        if not data.get("success"):
+            self.error_label.setText(f"Ошибка: {data.get('error')}")
+            return
+
+        self.map_files = data.get("files", [])
+
+        if not self.map_files:
+            self.populate_table()
+            return
+
+        # Загружаем каждую карту по очереди
+        for filename in self.map_files:
+            path = f"maps/{filename}"
+            req_id = None
+            if self.ws_client:
+                req_id = self.ws_client.send_request("file_get", path=path)
+            if req_id and self.parent_window:
+                self.parent_window.pending_requests[req_id] = (lambda d, fn=filename: self.on_map_details(fn, d))
+            else:
+                self.map_info[filename] = {"mod_time": "", "last_adm": ""}
+
+    # ==============================
+    #   ПОЛУЧЕНИЕ ДАННЫХ О КАРТЕ
+    # ==============================
+    def on_map_details(self, filename, data):
+        if not data.get("success"):
+            self.map_info[filename] = {"mod_time": "Ошибка", "last_adm": data.get("error", "")}
+        else:
+            file_data = data.get("data", {})
+            self.map_info[filename] = {
+                "mod_time": file_data.get("mod_time", ""),
+                "last_adm": file_data.get("last_adm", ""),
+            }
+
+        # после всех файлов — перерисовать таблицу
+        if len(self.map_info) == len(self.map_files):
+            self.populate_table()
+
+    # ==============================
+    #   ЗАПОЛНЕНИЕ ТАБЛИЦЫ
+    # ==============================
     def populate_table(self):
-        """ИСПРАВЛЕНО: Показываем только имена файлов, без загрузки данных"""
         self.table.setRowCount(len(self.map_files))
+
         for row, map_file in enumerate(self.map_files):
+            # display name without "map_" and suffix
             map_name = map_file.replace(".json", "").replace("map_", "")
-            # Показываем только имя, остальные колонки оставляем пустыми для быстрой загрузки
-            for col, value in enumerate([map_name, "", ""]):
+            info = self.map_info.get(map_file, {})
+
+            row_data = [
+                map_name,
+                info.get("mod_time", ""),
+                info.get("last_adm", "")
+            ]
+
+            for col, value in enumerate(row_data):
                 item = QTableWidgetItem(value)
                 item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
                 self.table.setItem(row, col, item)
