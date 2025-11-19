@@ -110,18 +110,21 @@ class EngineersManagementDialog(QDialog):
         """)
 
     def load_masters(self):
-        file = "lists/masters.json"
-        os.makedirs(os.path.dirname(file), exist_ok=True)
-        try:
-            if os.path.exists(file):
-                with open(file, "r", encoding="utf-8") as f:
-                    self.masters = json.load(f)
+        if not self.parent().ws_connected:
+            self.masters = []
+            self.update_master_list()
+            return
+
+        req = self.parent().ws_client.send_request("list_masters")
+
+        def on_resp(data):
+            if data.get("success"):
+                self.masters = data.get("masters", [])
             else:
                 self.masters = []
             self.update_master_list()
-        except json.JSONDecodeError as e:
-            self.show_toast(f"Ошибка в файле мастеров: {e}", "error")
-            self.masters = []
+
+        self.parent().pending_requests[req] = on_resp
 
     def update_master_list(self):
         self.master_list.clear()
@@ -131,18 +134,21 @@ class EngineersManagementDialog(QDialog):
                 self.master_list.setCurrentRow(self.masters.index(master))
 
     def load_engineers(self):
-        file = "lists/engineers.json"
-        os.makedirs(os.path.dirname(file), exist_ok=True)
-        try:
-            if os.path.exists(file):
-                with open(file, "r", encoding="utf-8") as f:
-                    self.engineers = json.load(f)
+        if not self.parent().ws_connected:
+            self.engineers = []
+            self.update_engineer_list()
+            return
+
+        req = self.parent().ws_client.send_request("list_engineers")
+
+        def on_resp(data):
+            if data.get("success"):
+                self.engineers = data.get("engineers", [])
             else:
                 self.engineers = []
             self.update_engineer_list()
-        except json.JSONDecodeError as e:
-            self.show_toast(f"Ошибка в файле техников: {e}", "error")
-            self.engineers = []
+
+        self.parent().pending_requests[req] = on_resp
 
     def update_engineer_list(self, item=None):
         if item:
@@ -298,13 +304,26 @@ class EngineersManagementDialog(QDialog):
         self.show_toast("Техник удалён", "success")
 
     def save_masters(self):
-        file = "lists/masters.json"
-        os.makedirs(os.path.dirname(file), exist_ok=True)
-        with open(file, "w", encoding="utf-8") as f:
-            json.dump(self.masters, f, ensure_ascii=False, indent=4)
+        if not self.parent().ws_connected:
+            self.parent().show_toast("Нет связи с сервером", "error")
+            return
+
+        req = self.parent().ws_client.send_request(
+            "save_masters",
+            masters=self.masters
+        )
+
+        self.parent().pending_requests[req] = lambda data: None
+
 
     def save_engineers(self):
-        file = "lists/engineers.json"
-        os.makedirs(os.path.dirname(file), exist_ok=True)
-        with open(file, "w", encoding="utf-8") as f:
-            json.dump(self.engineers, f, ensure_ascii=False, indent=4)
+        if not self.parent().ws_connected:
+            self.parent().show_toast("Нет связи с сервером", "error")
+            return
+
+        req = self.parent().ws_client.send_request(
+            "save_engineers",
+            engineers=self.engineers
+        )
+
+        self.parent().pending_requests[req] = lambda data: None
