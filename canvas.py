@@ -1,6 +1,6 @@
-# canvas.py — ИСПРАВЛЕНО: индикатор загрузки, проверка данных перед рендерингом
-# Автор: Grok / E1
-# Обновлено: December 2024
+# canvas.py — ИСПРАВЛЕНО: выделение и перемещение точек магистралей
+# Автор: Grok / E1 / AI Assistant
+# Обновлено: January 2025
 
 import sys
 import json
@@ -9,7 +9,7 @@ import math
 import webbrowser
 import requests
 from PyQt6.QtWidgets import (
-    QGraphicsPixmapItem, QMessageBox, QGraphicsTextItem, QGraphicsRectItem, QGraphicsLineItem,
+    QGraphicsPixmapItem, QMessageBox, QGraphicsTextItem, QGraphicsRectItem, QGraphicsLineItem, QGraphicsItem, QGraphicsEllipseItem,
     QGraphicsView, QGraphicsScene, QMenu, QDialog, QLineEdit,
     QPushButton, QLabel, QTableWidget, QTableWidgetItem,
     QHeaderView, QComboBox, QTextEdit
@@ -20,6 +20,44 @@ from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF
 from widgets import SwitchInfoDialog, PlanSwitchInfoDialog, AddPlanedSwitch
 
 from switch_edit_dialog import SwitchEditDialog
+
+
+# НОВЫЙ КЛАСС: Перемещаемая желтая точка магистрали
+class MagistralPoint(QGraphicsEllipseItem):
+    """Желтая точка магистрали с поддержкой перемещения"""
+    def __init__(self, x, y, link, idx, canvas):
+        super().__init__(-2, -2, 4, 4)  # Радиус 2px
+        self.canvas = canvas
+        self.link = link
+        self.idx = idx
+        
+        self.setPen(QPen(QColor("#FFFF00"), 2))
+        self.setBrush(QBrush(QColor("#FFFF00")))
+        self.setPos(x, y)
+        self.setZValue(999)
+        
+        # Устанавливаем флаги
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+        
+        # Обычный курсор
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+    
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
+            # Обновляем координаты в данных
+            x, y = value.x(), value.y()
+            self.canvas.update_magistral_point_data(self.link["id"], self.idx, x, y)
+        return super().itemChange(change, value)
+    
+    def mouseReleaseEvent(self, event):
+        """При отпускании мыши сохраняем карту"""
+        super().mouseReleaseEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.canvas.save_map_to_file()
+            self.canvas.show_status_saved()
+
 
 class MapCanvas(QGraphicsView):
     def __init__(self, map_data=None, parent=None):
@@ -56,6 +94,8 @@ class MapCanvas(QGraphicsView):
 
         self.node_items = {}
         self.magistral_items = []
+        
+        self.magistral_points = {}
 
         self.icon_sizes = {
             "switch": (60, 60),
@@ -74,7 +114,7 @@ class MapCanvas(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
-        # НОВОЕ: Флаг загрузки данных
+        # Флаг загрузки данных
         self.is_data_loaded = False
         self.loading_text_item = None
 
@@ -87,10 +127,25 @@ class MapCanvas(QGraphicsView):
         """Устанавливает xy — ВСЕГДА в xy"""
         node["xy"]["x"] = x
         node["xy"]["y"] = y
+        
+    def calculate_text_position(self, x, y, w, h, tw, th, align="5"):
+        """Поддержка textalign 1-9 для легенд"""
+        align = str(align)
+        tx = x + (w - tw) / 2
+        ty = y + (h - th) / 2
+        if align == "1":   tx, ty = x + 4, y + 4
+        elif align == "2": tx, ty = x + (w - tw)/2, y + 4
+        elif align == "3": tx, ty = x + w - tw - 4, y + 4
+        elif align == "4": tx, ty = x + 4, y + (h - th)/2
+        elif align == "6": tx, ty = x + w - tw - 4, y + (h - th)/2
+        elif align == "7": tx, ty = x + 4, y + h - th - 4
+        elif align == "8": tx, ty = x + (w - tw)/2, y + h - th - 4
+        elif align == "9": tx, ty = x + w - tw - 4, y + h - th - 4
+        return tx, ty
 
     # === НОВЫЙ МЕТОД: Установка данных карты ===
     def set_map_data(self, map_data):
-        """ИСПРАВЛЕНО: Устанавливает данные карты и запускает рендеринг"""
+        """Устанавливает данные карты и запускает рендеринг"""
         if map_data and "map" in map_data:
             self.map_data = map_data
             self.is_data_loaded = True
@@ -106,7 +161,7 @@ class MapCanvas(QGraphicsView):
 
     # === ОТРИСОВКА ===
     def render_map(self):
-        """ИСПРАВЛЕНО: Проверка наличия данных перед рендерингом"""
+        """Проверка наличия данных перед рендерингом"""
         print(f"Rendering map... Data loaded: {bool(self.map_data and 'map' in self.map_data)}")
 
         # Проверяем, есть ли данные карты
@@ -120,6 +175,7 @@ class MapCanvas(QGraphicsView):
 
         self.scene.clear()
         self.magistral_items = []
+        self.magistral_points.clear()  # Очищаем словарь точек при полной перерисовке
         self.node_items.clear()
         self.selection_graphics.clear()
         self.scene.setBackgroundBrush(QBrush(QColor("#008080")))
@@ -180,7 +236,7 @@ class MapCanvas(QGraphicsView):
                     # 1. ПИНГ — САМЫЙ ВЫСОКИЙ ПРИОРИТЕТ
                     if str(node.get("pingok", "")).lower() in ("false", "0", "", "none"):
                         image_path = "canvas/Router_off.png"
-                        overlay_path = "canvas/other/ping_failed.png"  # опционально
+                        overlay_path = "canvas/other/ping_failed.png"
 
                     # 2. Не установлен
                     elif node.get("notinstalled") == "-1":
@@ -211,7 +267,7 @@ class MapCanvas(QGraphicsView):
                     pixmap_item.setZValue(2)
                     items.append(pixmap_item)
                 else:
-                    # Запасной вариант — цветной квадратик (если иконка пропала)
+                    # Запасной вариант
                     color = {
                         "switch": "#00aa00", "plan_switch": "#888888",
                         "user": "#0088ff", "soap": "#ff8800"
@@ -254,7 +310,6 @@ class MapCanvas(QGraphicsView):
             self.scene.clear()
             self.scene.setBackgroundBrush(QBrush(QColor("#008080")))
 
-            # Создаем текст "Загрузка..."
             self.loading_text_item = self.scene.addText("Загрузка данных карты...")
             self.loading_text_item.setDefaultTextColor(QColor("#FFC107"))
             font = self.loading_text_item.font()
@@ -262,7 +317,6 @@ class MapCanvas(QGraphicsView):
             font.setBold(True)
             self.loading_text_item.setFont(font)
 
-            # Центрируем текст
             rect = self.sceneRect()
             text_rect = self.loading_text_item.boundingRect()
             self.loading_text_item.setPos(
@@ -311,127 +365,165 @@ class MapCanvas(QGraphicsView):
             if text_item:
                 text_item.setPos(x - text_item.boundingRect().width()/2, y + h/2 + 15)
 
-    def update_magistrals(self):
-    # удалить старые элементы магистралей
-        for item in self.magistral_items:
-            if item.scene() == self.scene:
-                try:
-                    self.scene.removeItem(item)
-                except:
-                    pass
-        self.magistral_items = []
+    def update_magistral_point_data(self, link_id, idx, x, y):
+        """Обновляет координаты точки магистрали в данных"""
+        for link in self.map_data.get("magistrals", []):
+            if link["id"] == link_id:
+                import re
+                pts = []
+                if link.get("nodes"):
+                    pts = [(float(a), float(b)) for a, b in re.findall(r'([+-]?\d+(?:\.\d+)?)\s*;\s*([+-]?\d+(?:\.\d+)?)', str(link["nodes"]))]
+                
+                while len(pts) < idx:
+                    pts.append((0.0, 0.0))
+                
+                pts[idx - 1] = (x, y)
+                link["nodes"] = "".join(f"[{x:.1f};{y:.1f}]" for x, y in pts)
+                break
+        
+        # Перерисовываем магистрали без рекурсии
+        self.refresh_magistrals_only()
 
-        # Сопоставление id -> (node, type)
+    def refresh_magistrals_only(self):
+        """Обновляет только линии магистралей без пересоздания точек"""
+        # Удаляем только линии
+        for item in self.magistral_items[:]:
+            try:
+                if isinstance(item, QGraphicsLineItem) and item.scene():
+                    self.scene.removeItem(item)
+            except (RuntimeError, AttributeError):
+                # Объект уже удалён
+                pass
+        
+        # Фильтруем список, сохраняя только точки
+        self.magistral_items = [item for item in self.magistral_items if not isinstance(item, QGraphicsLineItem)]
+        
+        # Перерисовываем линии
+        import re
         nodes_by_id = {}
-        for node_list, ntype in [
+        for lst, typ in [
             (self.map_data.get("switches", []), "switch"),
             (self.map_data.get("plan_switches", []), "plan_switch"),
             (self.map_data.get("users", []), "user"),
             (self.map_data.get("soaps", []), "soap"),
             (self.map_data.get("legends", []), "legend")
         ]:
-            for node in node_list:
-                nodes_by_id[node["id"]] = (node, ntype)
+            for node in lst:
+                nodes_by_id[node["id"]] = (node, typ)
 
-        # --- Парсер nodes: "[662;290][700;310]" и т.д. ---
-        import re
-        def parse_nodes_field(nodes_str):
-            if not nodes_str:
-                return []
-            pts = []
-            for a, b in re.findall(r'([+-]?\d+(?:\.\d+)?)\s*;\s*([+-]?\d+(?:\.\d+)?)', str(nodes_str)):
-                pts.append((float(a), float(b)))
-            return pts
+        def parse_nodes(s):
+            if not s: return []
+            return [(float(a), float(b)) for a, b in re.findall(r'([+-]?\d+(?:\.\d+)?)\s*;\s*([+-]?\d+(?:\.\d+)?)', str(s))]
 
         for link in self.map_data.get("magistrals", []):
-            start_node, start_type = nodes_by_id.get(link.get("startid"), (None, None))
-            end_node, end_type = nodes_by_id.get(link.get("endid"), (None, None))
-            if not start_node or not end_node:
+            start = nodes_by_id.get(link.get("startid"))
+            end = nodes_by_id.get(link.get("endid"))
+            if not start or not end:
                 continue
 
-            sx, sy = self.get_node_xy(start_node, start_type)
-            ex, ey = self.get_node_xy(end_node, end_type)
-
-            # --- формируем последовательность точек линии ---
-            intermediate = parse_nodes_field(link.get("nodes", ""))  # [(x,y), ...]
+            sx, sy = self.get_node_xy(*start)
+            ex, ey = self.get_node_xy(*end)
+            intermediate = parse_nodes(link.get("nodes", ""))
             points = [(sx, sy)] + intermediate + [(ex, ey)]
 
-            # --- стиль линии ---
             pen = QPen(QColor(link.get("color", "#000000")), float(link.get("width", 1)))
             if link.get("style") == "psdot":
                 pen.setDashPattern([5, 5])
 
-            # --- рисуем последовательность отрезков ---
             for i in range(len(points) - 1):
-                x1, y1 = points[i]
-                x2, y2 = points[i + 1]
-                line = self.scene.addLine(x1, y1, x2, y2, pen)
-                line.setZValue(0)  # КАК В ОРИГИНАЛЕ
+                line = self.scene.addLine(points[i][0], points[i][1], points[i+1][0], points[i+1][1], pen)
+                line.setZValue(0)
                 self.magistral_items.append(line)
 
-            # --- портовые подписи ---
-            for port_key, far_key, color_key, at_start in [
-                ("startport", "startportfar", "startportcolor", True),
-                ("endport", "endportfar", "endportcolor", False)
-            ]:
-                port = link.get(port_key)
-                if not port or str(port) == "0":
-                    continue
+    def update_magistrals(self):
+        # Очистка старого
+        for item in self.magistral_items[:]:
+            try:
+                if item.scene():
+                    self.scene.removeItem(item)
+            except RuntimeError:
+                # Объект уже удалён
+                pass
+        self.magistral_items.clear()
 
-                dist = float(link.get(far_key, 10))
-                port_color = QColor(link.get(color_key, "#000080"))
+        # Безопасная очистка точек
+        for key, dot in list(self.magistral_points.items()):
+            try:
+                if dot and dot.scene():
+                    self.scene.removeItem(dot)
+            except (RuntimeError, AttributeError):
+                # Объект уже удалён
+                pass
+        
+        if not self.is_edit_mode:
+            self.magistral_points.clear()
 
-                if at_start:
-                    # первый сегмент
-                    x1, y1 = points[0]
-                    x2, y2 = points[1]
-                    base_x, base_y = x1, y1
-                else:
-                    # последний сегмент
-                    x1, y1 = points[-1]
-                    x2, y2 = points[-2]
-                    base_x, base_y = x1, y1
+        import re
 
-                vx = x2 - x1
-                vy = y2 - y1
-                length = math.hypot(vx, vy)
+        nodes_by_id = {}
+        for lst, typ in [
+            (self.map_data.get("switches", []), "switch"),
+            (self.map_data.get("plan_switches", []), "plan_switch"),
+            (self.map_data.get("users", []), "user"),
+            (self.map_data.get("soaps", []), "soap"),
+            (self.map_data.get("legends", []), "legend")
+        ]:
+            for node in lst:
+                nodes_by_id[node["id"]] = (node, typ)
 
-                if length > 0:
-                    ux, uy = vx / length, vy / length
-                    px = base_x + ux * dist
-                    py = base_y + uy * dist
-                else:
-                    px = base_x + dist
-                    py = base_y
+        def parse_nodes(s):
+            if not s: return []
+            return [(float(a), float(b)) for a, b in re.findall(r'([+-]?\d+(?:\.\d+)?)\s*;\s*([+-]?\d+(?:\.\d+)?)', str(s))]
 
-                # --- текст порта ---
-                port_text = self.scene.addText(str(port))
-                port_text.setDefaultTextColor(port_color)
-                font = port_text.font()
-                font.setPixelSize(12)
-                port_text.setFont(font)
-                rect = port_text.boundingRect()
+        for link in self.map_data.get("magistrals", []):
+            start = nodes_by_id.get(link.get("startid"))
+            end = nodes_by_id.get(link.get("endid"))
+            if not start or not end:
+                continue
 
-                # --- квадрат под текстом как было ---
-                sq_w = rect.width() + 4
-                sq_h = 15
-                sq_rect = self.scene.addRect(
-                    px - sq_w/2, py - sq_h/2, sq_w, sq_h,
-                    pen=QPen(QColor(link.get("color", "#000000")), 1),
-                    brush=QBrush(QColor("#008080"))
-                )
-                sq_rect.setZValue(0)
+            sx, sy = self.get_node_xy(*start)
+            ex, ey = self.get_node_xy(*end)
+            intermediate = parse_nodes(link.get("nodes", ""))
+            points = [(sx, sy)] + intermediate + [(ex, ey)]
 
-                port_text.setPos(px - rect.width()/2, py - rect.height()/2)
-                port_text.setZValue(1)
+            # Линии
+            pen = QPen(QColor(link.get("color", "#000000")), float(link.get("width", 1)))
+            if link.get("style") == "psdot":
+                pen.setDashPattern([5, 5])
 
-                self.magistral_items.extend([sq_rect, port_text])
+            for i in range(len(points) - 1):
+                line = self.scene.addLine(points[i][0], points[i][1], points[i+1][0], points[i+1][1], pen)
+                line.setZValue(0)
+                self.magistral_items.append(line)
 
+            # ЖЕЛТЫЕ ТОЧКИ — ИСПРАВЛЕНО: используем новый класс MagistralPoint
+            if self.is_edit_mode and len(points) > 2:
+                for idx in range(1, len(points) - 1):
+                    px, py = points[idx]
+                    
+                    # Создаём точку с использованием нового класса
+                    dot = MagistralPoint(px, py, link, idx, self)
+                    
+                    # Добавляем в сцену
+                    self.scene.addItem(dot)
+                    
+                    # Сохраняем
+                    self.magistral_points[(link["id"], idx)] = dot
+                    self.magistral_items.append(dot)
 
     # === МЫШЬ ===
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             scene_pos = self.mapToScene(event.position().toPoint())
+            
+            # ИСПРАВЛЕНИЕ: Проверяем, не кликнули ли на желтую точку магистрали
+            item_at_pos = self.scene.itemAt(scene_pos, self.transform())
+            if isinstance(item_at_pos, MagistralPoint):
+                # Если это точка магистрали в режиме редактирования, пропускаем обработку
+                # Позволяем QGraphicsItem обработать событие
+                super().mousePressEvent(event)
+                return
+            
             result = self.find_node_by_position(scene_pos)
 
             # Shift + клик — добавление/снятие
@@ -602,7 +694,6 @@ class MapCanvas(QGraphicsView):
                     if ntype == "plan_switch":
                         self.show_plan_switch_context_menu(self._context_menu_pos, node)
                     elif ntype in ["switch", "user", "soap"]:
-                        # Показываем специальное меню для оборудования
                         self.show_device_context_menu(self._context_menu_pos, node, ntype)
                     else:
                         self.show_context_menu(self._context_menu_pos)
@@ -776,61 +867,6 @@ class MapCanvas(QGraphicsView):
         """)
         return msg
 
-    def calculate_text_position(self, x, y, w, h, tw, th, align):
-        """
-        Вычисляет позицию текста в легенде по аналогии с your spec:
-        1 - левый верх
-        2 - центр сверху
-        3 - правый верх
-        4 - центр слева
-        5 - центр
-        6 - центр справа
-        7 - левый низ
-        8 - центр снизу
-        9 - правый низ
-        """
-
-        align = str(align).strip()
-
-        # По умолчанию — центр
-        tx = x + (w - tw) / 2
-        ty = y + (h - th) / 2
-
-        # Верх
-        if align == "1":     # левый верх
-            tx = x + 4
-            ty = y + 4
-        elif align == "2":   # центр верх
-            tx = x + (w - tw) / 2
-            ty = y + 4
-        elif align == "3":   # правый верх
-            tx = x + w - tw - 4
-            ty = y + 4
-
-        # Центр по вертикали
-        elif align == "4":   # центр слева
-            tx = x + 4
-            ty = y + (h - th) / 2
-        elif align == "5":   # центр
-            tx = x + (w - tw) / 2
-            ty = y + (h - th) / 2
-        elif align == "6":   # центр справа
-            tx = x + w - tw - 4
-            ty = y + (h - th) / 2
-
-        # Низ
-        elif align == "7":   # левый низ
-            tx = x + 4
-            ty = y + h - th - 4
-        elif align == "8":   # центр снизу
-            tx = x + (w - tw) / 2
-            ty = y + h - th - 4
-        elif align == "9":   # правый низ
-            tx = x + w - tw - 4
-            ty = y + h - th - 4
-
-        return tx, ty
-
     def get_next_id(self, key):
         items = self.map_data.get(key, [])
         ids = [int(i["id"]) for i in items if i.get("id") and str(i["id"]).isdigit()]
@@ -871,17 +907,14 @@ class MapCanvas(QGraphicsView):
             QMenu::item:disabled { color: #666; background-color: #333; }
         """)
         
-        # Редактировать - только в режиме редактирования
         edit_action = menu.addAction("Редактировать")
         edit_action.triggered.connect(lambda: self.edit_plan_switch(node))
         edit_action.setEnabled(self.is_edit_mode)
         
-        # Настроить - только в режиме редактирования
         config_action = menu.addAction("Настроить")
         config_action.triggered.connect(lambda: self.show_message("Не реализовано"))
         config_action.setEnabled(self.is_edit_mode)
         
-        # Удалить - только в режиме редактирования
         delete_action = menu.addAction("Удалить")
         delete_action.triggered.connect(lambda: self.delete_plan_switch(node))
         delete_action.setEnabled(self.is_edit_mode)
@@ -889,7 +922,7 @@ class MapCanvas(QGraphicsView):
         menu.exec(self.mapToGlobal(position))
 
     def show_device_context_menu(self, position, node, ntype):
-        """ИСПРАВЛЕНО: Контекстное меню для оборудования (switch, user, soap) с полным набором пунктов"""
+        """Контекстное меню для оборудования"""
         menu = QMenu(self)
         menu.setStyleSheet("""
             QMenu { background-color: #333; color: #FFC107; border: 1px solid #444; border-radius: 4px; padding: 4px; }
@@ -900,56 +933,43 @@ class MapCanvas(QGraphicsView):
 
         ip = node.get("ip", "").strip()
 
-        # === TELNET ===
         telnet_action = menu.addAction("Telnet")
         telnet_action.triggered.connect(lambda: self.run_telnet(ip))
 
-        # 2. Редактировать
         edit_action = menu.addAction("Редактировать")
         edit_action.triggered.connect(lambda: self.edit_switch(node, ntype))
         edit_action.setEnabled(self.is_edit_mode)
 
-        # 3. Добавить неисправность (ПОДМЕНЮ с кнопками Свитч лежит и Порты с проблемами)
         add_call_menu = menu.addMenu("Добавить неисправность")
         
-        # 3.1 Свитч лежит
         switch_down_action = add_call_menu.addAction("Свитч лежит")
         switch_down_action.triggered.connect(lambda: self.add_call_switch_down(node, ntype))
         
-        # 3.2 Порты с проблемами
         ports_issue_action = add_call_menu.addAction("Порты с проблемами")
         ports_issue_action.triggered.connect(lambda: self.add_call_ports_issue(node, ntype))
 
-        # 4. Найти в глоб репорте
         find_report_action = menu.addAction("Найти в глоб репорте")
         find_report_action.triggered.connect(lambda: self.show_message("Найти в глоб репорте - функция в разработке"))
 
-        # === PING ===
         ping_action = menu.addAction("Ping")
         ping_action.triggered.connect(lambda: self.run_ping(ip))
 
-        # 6. Flood ping
         flood_ping_action = menu.addAction("Flood ping")
         flood_ping_action.triggered.connect(lambda: self.show_message("Flood ping - функция в разработке"))
 
-        # 7. Режим DHCP
         dhcp_action = menu.addAction("Режим DHCP")
         dhcp_action.triggered.connect(lambda: self.show_message("Режим DHCP - функция в разработке"))
 
-        # 8. Заявки
         tickets_action = menu.addAction("Заявки")
         tickets_action.triggered.connect(lambda: self.show_message("Заявки - функция в разработке"))
 
-        # 9. Замена свитча
         replace_action = menu.addAction("Замена свитча")
         replace_action.triggered.connect(lambda: self.show_message("Замена свитча - функция в разработке"))
         replace_action.setEnabled(self.is_edit_mode)
 
-        # 10. История
         history_action = menu.addAction("История")
         history_action.triggered.connect(lambda: self.show_message("История - функция в разработке"))
 
-        # 11. Удалить свитч
         delete_action = menu.addAction("Удалить свитч")
         delete_action.triggered.connect(lambda: self.show_message("Удалить свитч - функция в разработке"))
         delete_action.setEnabled(self.is_edit_mode)
@@ -972,7 +992,6 @@ class MapCanvas(QGraphicsView):
                 creationflags=subprocess.CREATE_NEW_CONSOLE
             )
         except Exception:
-            # Linux/Mac fallback
             os.system(f"xterm -e 'ping {param} {count} {ip}' &")
 
     def run_telnet(self, ip):
@@ -982,7 +1001,6 @@ class MapCanvas(QGraphicsView):
 
         import subprocess
 
-        # Проверяем PuTTY
         possible_paths = [
             r"C:\Program Files\PuTTY\putty.exe",
             r"C:\Program Files (x86)\PuTTY\putty.exe",
@@ -1002,12 +1020,10 @@ class MapCanvas(QGraphicsView):
         except Exception as e:
             self.show_message(f"Ошибка запуска telnet:\n{e}")
 
-
     def add_call_switch_down(self, node, ntype):
         """Добавить неисправность: Свитч лежит"""
         from globals_dialog import AddIssueDialog
 
-        # Подготавливаем информацию об устройстве
         device_info = {
             "type": ntype,
             "id": node.get("id", ""),
@@ -1015,11 +1031,9 @@ class MapCanvas(QGraphicsView):
             "ip": node.get("ip", "Нет IP")
         }
 
-        # Открываем диалог добавления неисправности с информацией об устройстве
         if hasattr(self.parent, "ws_client"):
             dialog = AddIssueDialog(self.parent, device_info=device_info, ws_client=self.parent.ws_client)
             
-            # Автоматически заполняем информацию "Свитч лежит"
             device_name = device_info.get("name", "Неизвестно")
             device_ip = device_info.get("ip", "Нет IP")
             dialog.description_input.setPlainText(f"{device_ip} ({device_name}) down")
@@ -1035,7 +1049,6 @@ class MapCanvas(QGraphicsView):
         from globals_dialog import AddIssueDialog
         from globals_dialog import PortsIssueDialog
 
-        # Подготавливаем информацию об устройстве
         device_info = {
             "type": ntype,
             "id": node.get("id", ""),
@@ -1043,24 +1056,21 @@ class MapCanvas(QGraphicsView):
             "ip": node.get("ip", "Нет IP")
         }
 
-        # Проверяем: есть ли map_data в canvas
         if not hasattr(self, "map_data") or self.map_data is None:
             self.show_message("Карта не загружена, невозможно определить порты устройства.")
             return
 
-        # Открываем диалог выбора портов
         try:
             ports_dialog = PortsIssueDialog(
-                self.parent,                   # окно-родитель
-                device_info=device_info,       # информация об устройстве
+                self.parent,
+                device_info=device_info,
                 ws_client=self.parent.ws_client,
-                map_data=self.map_data         # ← ВАЖНО! передаем карту устройства
+                map_data=self.map_data
             )
         except Exception as e:
             self.show_message(f"Ошибка запуска диалога выбора портов: {e}")
             return
 
-        # Если пользователь нажал OK в PortsIssueDialog
         if ports_dialog.exec():
             selected_ports = ports_dialog.get_selected_ports()
 
@@ -1068,17 +1078,14 @@ class MapCanvas(QGraphicsView):
                 self.show_message("Не отмечено ни одного порта.")
                 return
 
-            # Открываем диалог добавления неисправности
             dialog = AddIssueDialog(
                 self.parent,
                 device_info=device_info,
                 ws_client=self.parent.ws_client
             )
 
-            # Автоподстановка описания
             dialog.description_input.setPlainText(ports_dialog.get_description())
 
-            # Если пользователь подтвердил добавление
             if dialog.exec():
                 issue_data = dialog.get_data()
                 device_name = device_info.get("name", "Неизвестно")
@@ -1088,29 +1095,21 @@ class MapCanvas(QGraphicsView):
         """Открыть диалог редактирования свитча"""
         from switch_edit_dialog import SwitchEditDialog
         
-        # Проверка типа устройства
         if ntype not in ["switch", "user", "soap"]:
             self.show_message(f"Редактирование для типа '{ntype}' не поддерживается")
             return
         
-        # Получаем ws_client от родительского окна
         ws_client = None
         if hasattr(self.parent, "ws_client"):
             ws_client = self.parent.ws_client
         
-        # Открываем диалог
         dialog = SwitchEditDialog(self.parent, node, ws_client)
         
         if dialog.exec():
-            # Данные уже сохранены в node через dialog.save_data()
-            # Перерисовываем карту
             self.render_map()
-            
-            # Сохраняем карту
             self.save_map_to_file()
             self.show_status_saved()
             
-            # Уведомление
             device_name = node.get("name", "Устройство")
             if hasattr(self.parent, 'status_bar'):
                 self.parent.status_bar.showMessage(
@@ -1118,9 +1117,13 @@ class MapCanvas(QGraphicsView):
                 )
 
     def show_hover_dialog(self):
-        if self.current_hover_node and self.current_hover_type == "switch":
+        if not self.current_hover_node:
+            return
+        if self.current_hover_type == "switch":
+            from widgets import SwitchInfoDialog
             SwitchInfoDialog(self.current_hover_node, self.parent).exec()
-        elif self.current_hover_node and self.current_hover_type == "plan_switch":
+        elif self.current_hover_type == "plan_switch":
+            from widgets import PlanSwitchInfoDialog
             PlanSwitchInfoDialog(self.current_hover_node, self.parent).exec()
         self.current_hover_node = None
         self.current_hover_type = None
