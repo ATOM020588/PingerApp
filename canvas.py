@@ -312,11 +312,16 @@ class MapCanvas(QGraphicsView):
                 text_item.setPos(x - text_item.boundingRect().width()/2, y + h/2 + 15)
 
     def update_magistrals(self):
+    # удалить старые элементы магистралей
         for item in self.magistral_items:
             if item.scene() == self.scene:
-                self.scene.removeItem(item)
+                try:
+                    self.scene.removeItem(item)
+                except:
+                    pass
         self.magistral_items = []
 
+        # Сопоставление id -> (node, type)
         nodes_by_id = {}
         for node_list, ntype in [
             (self.map_data.get("switches", []), "switch"),
@@ -328,54 +333,100 @@ class MapCanvas(QGraphicsView):
             for node in node_list:
                 nodes_by_id[node["id"]] = (node, ntype)
 
+        # --- Парсер nodes: "[662;290][700;310]" и т.д. ---
+        import re
+        def parse_nodes_field(nodes_str):
+            if not nodes_str:
+                return []
+            pts = []
+            for a, b in re.findall(r'([+-]?\d+(?:\.\d+)?)\s*;\s*([+-]?\d+(?:\.\d+)?)', str(nodes_str)):
+                pts.append((float(a), float(b)))
+            return pts
+
         for link in self.map_data.get("magistrals", []):
-            start_node, start_type = nodes_by_id.get(link["startid"], (None, None))
-            end_node, end_type = nodes_by_id.get(link["endid"], (None, None))
+            start_node, start_type = nodes_by_id.get(link.get("startid"), (None, None))
+            end_node, end_type = nodes_by_id.get(link.get("endid"), (None, None))
             if not start_node or not end_node:
                 continue
 
             sx, sy = self.get_node_xy(start_node, start_type)
             ex, ey = self.get_node_xy(end_node, end_type)
 
-            pen = QPen(QColor(link.get("color", "#000")), float(link.get("width", 1)))
+            # --- формируем последовательность точек линии ---
+            intermediate = parse_nodes_field(link.get("nodes", ""))  # [(x,y), ...]
+            points = [(sx, sy)] + intermediate + [(ex, ey)]
+
+            # --- стиль линии ---
+            pen = QPen(QColor(link.get("color", "#000000")), float(link.get("width", 1)))
             if link.get("style") == "psdot":
                 pen.setDashPattern([5, 5])
-            line = self.scene.addLine(sx, sy, ex, ey, pen)
-            self.magistral_items.append(line)
 
-            # Порты
-            for port, node, other, pkey, fkey, ckey in [
-                (link.get("startport"), start_node, end_node, "startport", "startportfar", "startportcolor"),
-                (link.get("endport"), end_node, start_node, "endport", "endportfar", "endportcolor")
+            # --- рисуем последовательность отрезков ---
+            for i in range(len(points) - 1):
+                x1, y1 = points[i]
+                x2, y2 = points[i + 1]
+                line = self.scene.addLine(x1, y1, x2, y2, pen)
+                line.setZValue(0)  # КАК В ОРИГИНАЛЕ
+                self.magistral_items.append(line)
+
+            # --- портовые подписи ---
+            for port_key, far_key, color_key, at_start in [
+                ("startport", "startportfar", "startportcolor", True),
+                ("endport", "endportfar", "endportcolor", False)
             ]:
-                if not port or port == "0":
+                port = link.get(port_key)
+                if not port or str(port) == "0":
                     continue
-                dx = self.get_node_xy(other, nodes_by_id[link["endid"] if pkey == "startport" else link["startid"]][1])[0] - self.get_node_xy(node, nodes_by_id[link["startid"] if pkey == "startport" else link["endid"]][1])[0]
-                dy = self.get_node_xy(other, nodes_by_id[link["endid"] if pkey == "startport" else link["startid"]][1])[1] - self.get_node_xy(node, nodes_by_id[link["startid"] if pkey == "startport" else link["endid"]][1])[1]
-                length = math.hypot(dx, dy)
-                dist = float(link.get(fkey, 10))
-                if length > 0:
-                    dx, dy = dx / length, dy / length
-                    px = self.get_node_xy(node, nodes_by_id[link["startid"] if pkey == "startport" else link["endid"]][1])[0] + dx * dist
-                    py = self.get_node_xy(node, nodes_by_id[link["startid"] if pkey == "startport" else link["endid"]][1])[1] + dy * dist
-                else:
-                    px, py = self.get_node_xy(node, nodes_by_id[link["startid"] if pkey == "startport" else link["endid"]][1])[0] + dist, self.get_node_xy(node, nodes_by_id[link["startid"] if pkey == "startport" else link["endid"]][1])[1]
 
+                dist = float(link.get(far_key, 10))
+                port_color = QColor(link.get(color_key, "#000080"))
+
+                if at_start:
+                    # первый сегмент
+                    x1, y1 = points[0]
+                    x2, y2 = points[1]
+                    base_x, base_y = x1, y1
+                else:
+                    # последний сегмент
+                    x1, y1 = points[-1]
+                    x2, y2 = points[-2]
+                    base_x, base_y = x1, y1
+
+                vx = x2 - x1
+                vy = y2 - y1
+                length = math.hypot(vx, vy)
+
+                if length > 0:
+                    ux, uy = vx / length, vy / length
+                    px = base_x + ux * dist
+                    py = base_y + uy * dist
+                else:
+                    px = base_x + dist
+                    py = base_y
+
+                # --- текст порта ---
                 port_text = self.scene.addText(str(port))
-                port_text.setDefaultTextColor(QColor(link.get(ckey, "#000080")))
+                port_text.setDefaultTextColor(port_color)
                 font = port_text.font()
                 font.setPixelSize(12)
                 port_text.setFont(font)
                 rect = port_text.boundingRect()
+
+                # --- квадрат под текстом как было ---
                 sq_w = rect.width() + 4
                 sq_h = 15
-                sq_rect = self.scene.addRect(px - sq_w/2, py - sq_h/2, sq_w, sq_h,
-                    pen=QPen(QColor(link.get("color", "#000")), 1),
-                    brush=QBrush(QColor("#008080")))
+                sq_rect = self.scene.addRect(
+                    px - sq_w/2, py - sq_h/2, sq_w, sq_h,
+                    pen=QPen(QColor(link.get("color", "#000000")), 1),
+                    brush=QBrush(QColor("#008080"))
+                )
                 sq_rect.setZValue(0)
+
                 port_text.setPos(px - rect.width()/2, py - rect.height()/2)
                 port_text.setZValue(1)
+
                 self.magistral_items.extend([sq_rect, port_text])
+
 
     # === МЫШЬ ===
     def mousePressEvent(self, event):
