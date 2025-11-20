@@ -110,7 +110,7 @@ class LoginDialog(QDialog):
 
         # Логотип
         logo_label = QLabel()
-        logo_path = "logo/mainlogo.png"
+        logo_path = "icons/mainlogo.png"
         if os.path.exists(logo_path):
             pixmap = QPixmap(logo_path).scaled(200, 200, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             logo_label.setPixmap(pixmap)
@@ -167,6 +167,7 @@ class LoginDialog(QDialog):
 
         # Статус-бар
         self.status_bar = QStatusBar()
+        self.status_bar.setFixedHeight(20)
         self.status_bar.setStyleSheet("color: #FFC107; background-color: #444; border-radius: 4px;")
         layout.addWidget(self.status_bar)
 

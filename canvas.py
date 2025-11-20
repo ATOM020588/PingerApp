@@ -19,6 +19,8 @@ from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF
 
 from widgets import SwitchInfoDialog, PlanSwitchInfoDialog, AddPlanedSwitch
 
+from switch_edit_dialog import SwitchEditDialog
+
 class MapCanvas(QGraphicsView):
     def __init__(self, map_data=None, parent=None):
         super().__init__(parent)
@@ -135,12 +137,18 @@ class MapCanvas(QGraphicsView):
 
             text = self.scene.addText(legend.get("name") or legend.get("text") or "")
             text.setDefaultTextColor(QColor(legend.get("textcolor", "#000")))
-            text_rect = text.boundingRect()
-            text.setPos(x + (w - text_rect.width()) / 2, y + (h - text_rect.height()) / 2)
             font = text.font()
             font.setPixelSize(int(legend.get("textsize", 14)))
             font.setBold(True)
             text.setFont(font)
+            text_rect = text.boundingRect()
+            # Вычисляем позицию текста с учетом textalign
+            text_x, text_y = self.calculate_text_position(
+                x, y, w, h, 
+                text_rect.width(), text_rect.height(),
+                legend.get("textalign", "5")
+            )
+            text.setPos(text_x, text_y)
             text.setZValue(-1)
             key = (legend["id"], "legend")
             self.node_items[key] = [rect_item, text]
@@ -717,6 +725,61 @@ class MapCanvas(QGraphicsView):
         """)
         return msg
 
+    def calculate_text_position(self, x, y, w, h, tw, th, align):
+        """
+        Вычисляет позицию текста в легенде по аналогии с your spec:
+        1 - левый верх
+        2 - центр сверху
+        3 - правый верх
+        4 - центр слева
+        5 - центр
+        6 - центр справа
+        7 - левый низ
+        8 - центр снизу
+        9 - правый низ
+        """
+
+        align = str(align).strip()
+
+        # По умолчанию — центр
+        tx = x + (w - tw) / 2
+        ty = y + (h - th) / 2
+
+        # Верх
+        if align == "1":     # левый верх
+            tx = x + 4
+            ty = y + 4
+        elif align == "2":   # центр верх
+            tx = x + (w - tw) / 2
+            ty = y + 4
+        elif align == "3":   # правый верх
+            tx = x + w - tw - 4
+            ty = y + 4
+
+        # Центр по вертикали
+        elif align == "4":   # центр слева
+            tx = x + 4
+            ty = y + (h - th) / 2
+        elif align == "5":   # центр
+            tx = x + (w - tw) / 2
+            ty = y + (h - th) / 2
+        elif align == "6":   # центр справа
+            tx = x + w - tw - 4
+            ty = y + (h - th) / 2
+
+        # Низ
+        elif align == "7":   # левый низ
+            tx = x + 4
+            ty = y + h - th - 4
+        elif align == "8":   # центр снизу
+            tx = x + (w - tw) / 2
+            ty = y + h - th - 4
+        elif align == "9":   # правый низ
+            tx = x + w - tw - 4
+            ty = y + h - th - 4
+
+        return tx, ty
+
     def get_next_id(self, key):
         items = self.map_data.get(key, [])
         ids = [int(i["id"]) for i in items if i.get("id") and str(i["id"]).isdigit()]
@@ -748,11 +811,30 @@ class MapCanvas(QGraphicsView):
         menu.exec(self.mapToGlobal(position))
 
     def show_plan_switch_context_menu(self, position, node):
+        """Контекстное меню для планируемого свитча"""
         menu = QMenu(self)
-        menu.setStyleSheet("QMenu { background-color: #333; color: #FFC107; border: 0px solid #FFC107; }")
-        menu.addAction("Редактировать").triggered.connect(lambda: self.edit_plan_switch(node))
-        menu.addAction("Настроить").triggered.connect(lambda: self.show_message("Не реализовано"))
-        menu.addAction("Удалить").triggered.connect(lambda: self.delete_plan_switch(node))
+        menu.setStyleSheet("""
+            QMenu { background-color: #333; color: #FFC107; border: 1px solid #444; border-radius: 4px; padding: 4px; }
+            QMenu::item { padding: 6px 20px; border-radius: 3px; }
+            QMenu::item:selected { background-color: #555; }
+            QMenu::item:disabled { color: #666; background-color: #333; }
+        """)
+        
+        # Редактировать - только в режиме редактирования
+        edit_action = menu.addAction("Редактировать")
+        edit_action.triggered.connect(lambda: self.edit_plan_switch(node))
+        edit_action.setEnabled(self.is_edit_mode)
+        
+        # Настроить - только в режиме редактирования
+        config_action = menu.addAction("Настроить")
+        config_action.triggered.connect(lambda: self.show_message("Не реализовано"))
+        config_action.setEnabled(self.is_edit_mode)
+        
+        # Удалить - только в режиме редактирования
+        delete_action = menu.addAction("Удалить")
+        delete_action.triggered.connect(lambda: self.delete_plan_switch(node))
+        delete_action.setEnabled(self.is_edit_mode)
+        
         menu.exec(self.mapToGlobal(position))
 
     def show_device_context_menu(self, position, node, ntype):
@@ -773,10 +855,11 @@ class MapCanvas(QGraphicsView):
 
         # 2. Редактировать
         edit_action = menu.addAction("Редактировать")
-        edit_action.triggered.connect(lambda: self.show_message("Редактировать - функция в разработке"))
+        edit_action.triggered.connect(lambda: self.edit_switch(node, ntype))
+        edit_action.setEnabled(self.is_edit_mode)
 
-        # 3. Добавить звонок (ПОДМЕНЮ с кнопками Свитч лежит и Порты с проблемами)
-        add_call_menu = menu.addMenu("Добавить звонок")
+        # 3. Добавить неисправность (ПОДМЕНЮ с кнопками Свитч лежит и Порты с проблемами)
+        add_call_menu = menu.addMenu("Добавить неисправность")
         
         # 3.1 Свитч лежит
         switch_down_action = add_call_menu.addAction("Свитч лежит")
@@ -809,6 +892,7 @@ class MapCanvas(QGraphicsView):
         # 9. Замена свитча
         replace_action = menu.addAction("Замена свитча")
         replace_action.triggered.connect(lambda: self.show_message("Замена свитча - функция в разработке"))
+        replace_action.setEnabled(self.is_edit_mode)
 
         # 10. История
         history_action = menu.addAction("История")
@@ -817,6 +901,7 @@ class MapCanvas(QGraphicsView):
         # 11. Удалить свитч
         delete_action = menu.addAction("Удалить свитч")
         delete_action.triggered.connect(lambda: self.show_message("Удалить свитч - функция в разработке"))
+        delete_action.setEnabled(self.is_edit_mode)
 
         menu.exec(self.mapToGlobal(position))
 
@@ -868,8 +953,8 @@ class MapCanvas(QGraphicsView):
 
 
     def add_call_switch_down(self, node, ntype):
-        """Добавить звонок: Свитч лежит"""
-        from globals_dialog import AddCallDialog
+        """Добавить неисправность: Свитч лежит"""
+        from globals_dialog import AddIssueDialog
 
         # Подготавливаем информацию об устройстве
         device_info = {
@@ -879,24 +964,25 @@ class MapCanvas(QGraphicsView):
             "ip": node.get("ip", "Нет IP")
         }
 
-        # Открываем диалог добавления звонка с информацией об устройстве
+        # Открываем диалог добавления неисправности с информацией об устройстве
         if hasattr(self.parent, "ws_client"):
-            dialog = AddCallDialog(self.parent, device_info=device_info, ws_client=self.parent.ws_client)
+            dialog = AddIssueDialog(self.parent, device_info=device_info, ws_client=self.parent.ws_client)
             
             # Автоматически заполняем информацию "Свитч лежит"
             device_name = device_info.get("name", "Неизвестно")
             device_ip = device_info.get("ip", "Нет IP")
-            dialog.info_input.setPlainText(f"СВИТЧ ЛЕЖИТ: {device_ip} ({device_name})")
+            dialog.description_input.setPlainText(f"{device_ip} ({device_name}) down")
             
             if dialog.exec():
-                call_data = dialog.get_data()
-                self.show_message(f"Звонок добавлен: Свитч лежит - {device_name}")
+                issue_data = dialog.get_data()
+                self.show_message(f"Неисправность добавлена: Свитч лежит - {device_name}")
         else:
             self.show_message("Нет связи с сервером")
 
     def add_call_ports_issue(self, node, ntype):
-        """Добавить звонок: Порты с проблемами"""
-        from globals_dialog import AddCallDialog
+        """Добавить неисправность: Порты с проблемами"""
+        from globals_dialog import AddIssueDialog
+        from globals_dialog import PortsIssueDialog
 
         # Подготавливаем информацию об устройстве
         device_info = {
@@ -906,20 +992,79 @@ class MapCanvas(QGraphicsView):
             "ip": node.get("ip", "Нет IP")
         }
 
-        # Открываем диалог добавления звонка с информацией об устройстве
-        if hasattr(self.parent, "ws_client"):
-            dialog = AddCallDialog(self.parent, device_info=device_info, ws_client=self.parent.ws_client)
-            
-            # Автоматически заполняем информацию "Порты с проблемами"
-            device_name = device_info.get("name", "Неизвестно")
-            device_ip = device_info.get("ip", "Нет IP")
-            dialog.info_input.setPlainText(f"ПОРТЫ С ПРОБЛЕМАМИ: {device_ip} ({device_name})")
-            
+        # Проверяем: есть ли map_data в canvas
+        if not hasattr(self, "map_data") or self.map_data is None:
+            self.show_message("Карта не загружена, невозможно определить порты устройства.")
+            return
+
+        # Открываем диалог выбора портов
+        try:
+            ports_dialog = PortsIssueDialog(
+                self.parent,                   # окно-родитель
+                device_info=device_info,       # информация об устройстве
+                ws_client=self.parent.ws_client,
+                map_data=self.map_data         # ← ВАЖНО! передаем карту устройства
+            )
+        except Exception as e:
+            self.show_message(f"Ошибка запуска диалога выбора портов: {e}")
+            return
+
+        # Если пользователь нажал OK в PortsIssueDialog
+        if ports_dialog.exec():
+            selected_ports = ports_dialog.get_selected_ports()
+
+            if not selected_ports:
+                self.show_message("Не отмечено ни одного порта.")
+                return
+
+            # Открываем диалог добавления неисправности
+            dialog = AddIssueDialog(
+                self.parent,
+                device_info=device_info,
+                ws_client=self.parent.ws_client
+            )
+
+            # Автоподстановка описания
+            dialog.description_input.setPlainText(ports_dialog.get_description())
+
+            # Если пользователь подтвердил добавление
             if dialog.exec():
-                call_data = dialog.get_data()
-                self.show_message(f"Звонок добавлен: Порты с проблемами - {device_name}")
-        else:
-            self.show_message("Нет связи с сервером")
+                issue_data = dialog.get_data()
+                device_name = device_info.get("name", "Неизвестно")
+                self.show_message(f"Неисправность добавлена: Порты с проблемами — {device_name}")
+
+    def edit_switch(self, node, ntype):
+        """Открыть диалог редактирования свитча"""
+        from switch_edit_dialog import SwitchEditDialog
+        
+        # Проверка типа устройства
+        if ntype not in ["switch", "user", "soap"]:
+            self.show_message(f"Редактирование для типа '{ntype}' не поддерживается")
+            return
+        
+        # Получаем ws_client от родительского окна
+        ws_client = None
+        if hasattr(self.parent, "ws_client"):
+            ws_client = self.parent.ws_client
+        
+        # Открываем диалог
+        dialog = SwitchEditDialog(self.parent, node, ws_client)
+        
+        if dialog.exec():
+            # Данные уже сохранены в node через dialog.save_data()
+            # Перерисовываем карту
+            self.render_map()
+            
+            # Сохраняем карту
+            self.save_map_to_file()
+            self.show_status_saved()
+            
+            # Уведомление
+            device_name = node.get("name", "Устройство")
+            if hasattr(self.parent, 'status_bar'):
+                self.parent.status_bar.showMessage(
+                    f"Устройство '{device_name}' успешно обновлено", 3000
+                )
 
     def show_hover_dialog(self):
         if self.current_hover_node and self.current_hover_type == "switch":

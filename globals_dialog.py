@@ -4,10 +4,11 @@
 
 import csv
 import os
+import json
 import uuid
 from datetime import datetime
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
+    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget, QCheckBox, QWidget,
     QTableWidgetItem, QHeaderView, QLabel, QLineEdit, QTextEdit,
     QComboBox, QMessageBox, QFileDialog, QRadioButton, QButtonGroup,
     QSpinBox, QDateTimeEdit, QFormLayout, QGroupBox
@@ -120,7 +121,7 @@ class AddIssueDialog(QDialog):
         left_layout.addLayout(top_panel)
 
         # === ОПИСАНИЕ ПРОБЛЕМЫ ===
-        layout.addWidget(QLabel("Описание проблемы"))
+        left_layout.addWidget(QLabel("Описание проблемы"))
         self.description_input = QTextEdit()
         self.description_input.setMaximumHeight(100)
         if issue_data:
@@ -129,7 +130,7 @@ class AddIssueDialog(QDialog):
             device_name = device_info.get("name", "")
             device_ip = device_info.get("ip", "")
             self.description_input.setPlainText(f"{device_ip} ({device_name}) down")
-        layout.addWidget(self.description_input)
+        left_layout.addWidget(self.description_input)
 
         # === СРЕДНЯЯ ПАНЕЛЬ: Типы проблем (радиокнопки) ===
         severity_panel = QHBoxLayout()
@@ -167,10 +168,10 @@ class AddIssueDialog(QDialog):
             elif not issue_data and severity_name == "Высокая":
                 radio.setChecked(True)
 
-        layout.addLayout(severity_panel)
+        left_layout.addLayout(severity_panel)
 
         # === ИСТОРИЯ ===
-        layout.addWidget(QLabel("История"))
+        left_layout.addWidget(QLabel("История"))
         self.history_table = QTableWidget()
         self.history_table.setColumnCount(3)
         self.history_table.setHorizontalHeaderLabels(["Дата", "Описание", "Решение"])
@@ -183,7 +184,7 @@ class AddIssueDialog(QDialog):
         # Загружаем историю устройства
         self.populate_history()
 
-        layout.addWidget(self.history_table)
+        left_layout.addWidget(self.history_table)
 
         # === КНОПКИ ===
         buttons = QHBoxLayout()
@@ -211,38 +212,39 @@ class AddIssueDialog(QDialog):
         buttons.addWidget(add_to_button)
         buttons.addWidget(edit_data_button)
 
-        layout.addLayout(buttons)
+        left_layout.addLayout(buttons)
 
-        self.setLayout(layout)
+        self.setLayout(left_layout)
         self.setStyleSheet("""
-            QDialog { background-color: #333; color: #FFC107; border: 1px solid #FFC107; }
-            QLabel { color: #FFC107; font-weight: bold; }
-            QLineEdit, QTextEdit, QSpinBox, QComboBox, QDateTimeEdit {
-                background-color: #444;
-                color: #FFC107;
-                border: 1px solid #555;
-                border-radius: 4px;
-                padding: 5px;
+            QDialog { 
+                background-color: #333; 
+                color: #FFC107; 
+                border: 1px solid #FFC107; 
             }
+            QLabel { color: #FFC107; }
             QTableWidget {
                 background-color: #444;
                 color: #000000;
                 border: 1px solid #555;
+                gridline-color: #555;
             }
             QHeaderView::section {
                 background-color: #333;
                 color: #FFC107;
                 border: 1px solid #555;
                 padding: 5px;
+                font-weight: bold;
             }
-            QPushButton {
-                background-color: #444;
-                color: #FFC107;
-                border: 1px solid #555;
-                border-radius: 4px;
-                padding: 8px 16px;
+            QTableWidget::item {
+                padding: 5px;
             }
-            QPushButton:hover { background-color: #555; }
+            QCheckBox {
+                spacing: 5px;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+            }
         """)
 
     def load_engineers(self):
@@ -918,3 +920,326 @@ class GlobalIssuesDialog(QDialog):
         """Показывает сообщение пользователю"""
         if hasattr(self.parent_window, "status_bar"):
             self.parent_window.status_bar.showMessage(text, 3000)
+
+# =====================================================================
+# PortsIssueDialog — диалог выбора проблем по портам устройства
+# =====================================================================
+from PyQt6.QtWidgets import (
+    QDialog, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
+    QHeaderView, QPushButton, QHBoxLayout, QWidget, QCheckBox
+)
+from PyQt6.QtGui import QColor
+from PyQt6.QtCore import Qt
+
+
+class PortsIssueDialog(QDialog):
+    """Диалог выбора проблем по портам устройства. Принимает карту из canvas."""
+
+    def __init__(self, parent=None, device_info=None, ws_client=None, map_data=None):
+        super().__init__(parent)
+
+        self.setWindowTitle("⚠ Проблемы с портами")
+        self.setFixedSize(950, 620)
+
+        self.device_info = device_info or {}
+        self.ws_client = ws_client
+        self.map_data = map_data  # ВАЖНО: карта передаётся canvas.py
+
+        # Массив портов из карты
+        self.ports_data = []
+        # Хранилище выбранных отметок
+        self.selected = {}
+
+        layout = QVBoxLayout()
+
+        # Заголовок
+        title = QLabel("Проблемы с портами")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFC107; padding: 5px;")
+        layout.addWidget(title)
+
+        # Информация об устройстве
+        dn = self.device_info.get("name", "Неизвестно")
+        ip = self.device_info.get("ip", "Нет IP")
+        info_lbl = QLabel(f"Устройство: {dn} ({ip})")
+        info_lbl.setStyleSheet("color: #FFC107; padding: 4px;")
+        layout.addWidget(info_lbl)
+
+        # Таблица
+        self.table = QTableWidget()
+        self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels([
+            "Порт",
+            "Нет линка",
+            "Нет маков",
+            "Частично",
+            "Перевод абонентов",
+            "Потери",
+            "Описание"
+        ])
+
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        header.resizeSection(0, 60)
+
+        for col in range(1, 6):
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            header.resizeSection(col, 140)
+
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+
+        layout.addWidget(self.table)
+
+        # Кнопки
+        btns = QHBoxLayout()
+
+        ok_btn = QPushButton("✓ OK")
+        cancel_btn = QPushButton("✗ Cancel")
+
+        # Стиль кнопок
+        btn_style = """
+        QPushButton {
+            background-color: #444;
+            color: #FFC107;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 10px;
+        }
+        QPushButton:hover {
+            background-color: #555;
+        }
+        """
+
+        ok_btn.setStyleSheet(btn_style)
+        cancel_btn.setStyleSheet(btn_style)
+
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+
+        btns.addStretch()
+        btns.addWidget(ok_btn)
+        btns.addWidget(cancel_btn)
+        layout.addLayout(btns)
+
+        # Статус
+        self.status_label = QLabel("Готово")
+        self.status_label.setStyleSheet("color: #FFC107; padding: 4px;")
+        layout.addWidget(self.status_label)
+
+        self.setLayout(layout)
+
+        # Общий стиль
+        self.setStyleSheet("""
+            QDialog { background-color: #333; color: #FFC107; }
+            QLabel { color: #FFC107; }
+
+            QTableWidget {
+                background-color: #444;
+                color: #000;
+                border: 1px solid #555;
+            }
+
+            QHeaderView::section {
+                background-color: #222;
+                color: #FFC107;
+                border: 1px solid #555;
+                font-weight: bold;
+            }
+
+            QTableWidget::item {
+                padding: 4px;
+            }
+
+            /* Чекбоксы по требованиям */
+            QCheckBox { 
+                color: #FFC107; 
+                font-size: 12px; 
+                spacing: 8px; 
+                padding: 4px;
+            }
+            QCheckBox::indicator { 
+                width: 12px; 
+                height: 12px; 
+                border-radius: 4px; 
+                border: 2px solid #555; 
+                background-color: #333; 
+            }
+            QCheckBox::indicator:checked { 
+                background-color: #FFC107; 
+                border: 2px solid #FFC107; 
+            }
+            QCheckBox::indicator:checked:hover { 
+                background-color: #FFB300; 
+                border: 2px solid #FFB300;
+            }
+            QCheckBox::indicator:hover { 
+                border: 2px solid #FFC107; 
+            }
+        """)
+
+        # Загружаем порты устройства
+        self.load_ports_from_map()
+
+    # ======================================================================
+    # Загрузка портов из карты, переданной canvas.py
+    # ======================================================================
+    def load_ports_from_map(self):
+
+        if not self.map_data:
+            self.status_label.setText("Карта не передана из canvas")
+            self.ports_data = []
+            self.populate_table()
+            return
+
+        dev_id = self.device_info.get("id")
+        dev_ip = self.device_info.get("ip")
+
+        target = None
+
+        # По ID
+        for sw in self.map_data.get("switches", []):
+            if sw.get("id") == dev_id:
+                target = sw
+                break
+
+        # По IP
+        if target is None:
+            for sw in self.map_data.get("switches", []):
+                if sw.get("ip") == dev_ip:
+                    target = sw
+                    break
+
+        if target is None:
+            self.status_label.setText("Устройство отсутствует в карте")
+            self.ports_data = []
+            self.populate_table()
+            return
+
+        ports = []
+        for p in target.get("ports", []):
+            ports.append({
+                "port": int(p.get("number", 0)),
+                "desc": p.get("description", ""),
+                "color": p.get("color", None),
+                "bold": p.get("bold", False)
+            })
+
+        ports.sort(key=lambda x: x["port"])
+
+        self.ports_data = ports
+        self.populate_table()
+
+    # ======================================================================
+    # Заполнение таблицы
+    # ======================================================================
+    def populate_table(self):
+        self.table.setRowCount(len(self.ports_data))
+
+        col_flags = ["nl", "nm", "part", "move", "loss"]
+
+        for row, info in enumerate(self.ports_data):
+            port = info["port"]
+
+            # Инициализация флагов
+            self.selected[port] = {"nl": False, "nm": False, "part": False, "move": False, "loss": False}
+
+            # Порт
+            item_port = QTableWidgetItem(str(port))
+            item_port.setForeground(QColor("#FFC107"))
+            item_port.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(row, 0, item_port)
+
+            # Чекбоксы
+            for i, key in enumerate(col_flags, start=1):
+                cb = QCheckBox()
+                cb_widget = QWidget()
+                lay = QHBoxLayout(cb_widget)
+                lay.addWidget(cb)
+                lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                lay.setContentsMargins(0, 0, 0, 0)
+                cb.stateChanged.connect(lambda state, p=port, k=key: self.on_checkbox_changed(p, k, state))
+                self.table.setCellWidget(row, i, cb_widget)
+
+            # Описание (цвет из карты)
+            desc_item = QTableWidgetItem(info.get("desc", ""))
+
+            p_color = info.get("color")
+            if p_color:
+                desc_item.setForeground(QColor(p_color))
+            else:
+                desc_item.setForeground(QColor("#DDDDDD"))
+
+            if info.get("bold"):
+                f = desc_item.font()
+                f.setBold(True)
+                desc_item.setFont(f)
+
+            self.table.setItem(row, 6, desc_item)
+
+    # ======================================================================
+    # Обработка изменения чекбоксов
+    # ======================================================================
+    def on_checkbox_changed(self, port, key, state):
+        self.selected[port][key] = (state == Qt.CheckState.Checked.value)
+        cnt = sum(1 for v in self.selected.values() if any(v.values()))
+        self.status_label.setText(f"Отмечено портов: {cnt}")
+
+    # ======================================================================
+    # Возврат выбранных портов
+    # ======================================================================
+    def get_selected_ports(self):
+        out = []
+        for port, flags in self.selected.items():
+            if any(flags.values()):
+                out.append({"port": port, **flags})
+        return out
+
+    # ======================================================================
+    # Формирование текста для AddIssueDialog
+    # ======================================================================
+    def get_description(self):
+        device_name = self.device_info.get("name", "Неизвестно")
+        device_ip = self.device_info.get("ip", "Нет IP")
+
+        # Заголовок
+        txt = f"{device_ip} ({device_name})\n"
+
+        # Группы по типу отметки
+        groups = {
+            "nl":     {"name": "нет линка",           "ports": []},
+            "nm":     {"name": "нет маков",           "ports": []},
+            "part":   {"name": "частично",            "ports": []},
+            "move":   {"name": "перевод абонентов",   "ports": []},
+            "loss":   {"name": "потери",              "ports": []},
+        }
+
+        # Привязка описаний из карты
+        desc_map = {p["port"]: p.get("desc", "") for p in self.ports_data}
+
+        # Собираем отмеченные порты по группам
+        for port, flags in self.selected.items():
+            if not any(flags.values()):
+                continue
+
+            for key, val in flags.items():
+                if val:
+                    groups[key]["ports"].append(port)
+
+        # Конструируем финальный текст
+        for key, g in groups.items():
+            if not g["ports"]:
+                continue
+
+            txt += f"{g['name']}:\n"
+
+            for port in g["ports"]:
+                desc = desc_map.get(port, "").strip()
+                if desc:
+                    txt += f"   {port} - {desc}\n"
+                else:
+                    txt += f"   {port}\n"
+
+        return txt.strip()
