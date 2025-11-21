@@ -30,6 +30,7 @@ class SwitchEditDialog(QDialog):
         self.models_list = []
         self.masters_list = []
         self.pending_requests = {}
+        self.ports_count = 24  # По умолчанию
         
         self.init_ui()
         self.load_models()
@@ -298,44 +299,8 @@ class SwitchEditDialog(QDialog):
                         ports_count = 24
                     
                     # Обновляем количество портов в таблице
-                    current_rows = self.ports_table.rowCount()
-                    
-                    if ports_count != current_rows:
-                        # Сохраняем текущие данные портов
-                        current_ports = {}
-                        for row in range(current_rows):
-                            port_item = self.ports_table.item(row, 0)
-                            desc_item = self.ports_table.item(row, 1)
-                            if port_item and desc_item:
-                                port_num = port_item.text()
-                                if port_num:
-                                    current_ports[port_num] = {
-                                        'description': desc_item.text(),
-                                        'bold': desc_item.font().bold()
-                                    }
-                        
-                        # Устанавливаем новое количество строк
-                        self.ports_table.setRowCount(ports_count)
-                        
-                        # Заполняем порты
-                        for i in range(ports_count):
-                            port_num = str(i + 1)
-                            
-                            # Колонка "Порт"
-                            port_item = QTableWidgetItem(port_num)
-                            self.ports_table.setItem(i, 0, port_item)
-                            
-                            # Колонка "Описание"
-                            if port_num in current_ports:
-                                desc_item = QTableWidgetItem(current_ports[port_num]['description'])
-                                if current_ports[port_num]['bold']:
-                                    font = desc_item.font()
-                                    font.setBold(True)
-                                    desc_item.setFont(font)
-                            else:
-                                desc_item = QTableWidgetItem("")
-                            
-                            self.ports_table.setItem(i, 1, desc_item)
+                    self.ports_count = ports_count
+                    self.update_ports_table_structure()
                 else:
                     print(f"Ошибка загрузки данных модели: {data.get('error')}")
             
@@ -343,7 +308,58 @@ class SwitchEditDialog(QDialog):
                 self.parent_window.pending_requests[request_id] = on_model_data_response
             else:
                 self.pending_requests[request_id] = on_model_data_response
+    
+    def update_ports_table_structure(self):
+        """Обновляет структуру таблицы портов при изменении модели"""
+        current_rows = self.ports_table.rowCount()
         
+        if self.ports_count != current_rows:
+            # Сохраняем текущие данные портов
+            current_ports = {}
+            for row in range(current_rows):
+                port_item = self.ports_table.item(row, 0)
+                desc_item = self.ports_table.item(row, 1)
+                if port_item and desc_item:
+                    port_num = port_item.text()
+                    if port_num:
+                        # Сохраняем цвет и жирность описания
+                        color = desc_item.foreground().color().name()
+                        bold = desc_item.font().bold()
+                        current_ports[port_num] = {
+                            'description': desc_item.text(),
+                            'color': color,
+                            'bold': bold
+                        }
+            
+            # Устанавливаем новое количество строк
+            self.ports_table.setRowCount(self.ports_count)
+            
+            # Заполняем порты
+            for i in range(self.ports_count):
+                port_num = str(i + 1)
+                
+                # Колонка "Порт" - всегда стандартный цвет
+                port_item = QTableWidgetItem(port_num)
+                self.ports_table.setItem(i, 0, port_item)
+                
+                # Колонка "Описание"
+                if port_num in current_ports:
+                    desc_item = QTableWidgetItem(current_ports[port_num]['description'])
+                    
+                    # Применяем цвет
+                    desc_item.setForeground(QColor(current_ports[port_num]['color']))
+                    
+                    # Применяем жирность
+                    if current_ports[port_num]['bold']:
+                        font = desc_item.font()
+                        font.setBold(True)
+                        desc_item.setFont(font)
+                else:
+                    desc_item = QTableWidgetItem("")
+                    desc_item.setForeground(QColor("#FFC107"))
+                
+                self.ports_table.setItem(i, 1, desc_item)
+    
     def load_data(self):
         """Загрузка данных свитча в форму"""
         if not self.switch_data:
@@ -370,6 +386,12 @@ class SwitchEditDialog(QDialog):
                 self.model_combo.setCurrentIndex(index)
             else:
                 self.model_combo.setCurrentText(model)
+            
+            # ИСПРАВЛЕНО: Загружаем количество портов из модели перед загрузкой портов
+            self.load_model_ports_count(model)
+        else:
+            # Если модели нет, загружаем порты сразу
+            self.load_ports_from_data()
         
         # Мастер
         master = self.switch_data.get("master", "")
@@ -386,42 +408,108 @@ class SwitchEditDialog(QDialog):
         self.reaction_time_input.setValue(int(self.switch_data.get("reaction_time", 60)))
         self.note_input.setPlainText(self.switch_data.get("note", ""))
         self.last_editor_input.setText(self.switch_data.get("last_editor", ""))
+    
+    def load_model_ports_count(self, model_name):
+        """Загружает количество портов из файла модели перед загрузкой данных"""
+        if not model_name or not self.ws_client:
+            # Если нет модели или ws_client, загружаем порты сразу
+            self.load_ports_from_data()
+            return
         
-        # ИЗМЕНЕНО: Загрузка портов в 2 колонки
-        ports = self.switch_data.get("ports", [])
-        if ports:
-            # Находим максимальный номер порта
-            max_port = max((p.get("port_num", 0) for p in ports), default=0)
-            self.ports_table.setRowCount(max_port)
+        # Преобразуем имя модели в имя файла
+        model_filename = model_name.replace(" ", "_")
+        model_filename = re.sub(r'[^\w.-]', '_', model_filename)
+        
+        # Запрос данных модели
+        request_id = self.ws_client.send_request(
+            "file_get",
+            path=f"data/models/model_{model_filename}.json"
+        )
+        
+        if request_id:
+            def on_model_data_response(data):
+                if data.get("success") and data.get("data"):
+                    model_data = data.get("data", {})
+                    ports_count_str = model_data.get("ports_count", "24")
+                    try:
+                        self.ports_count = int(ports_count_str)
+                    except (ValueError, TypeError):
+                        self.ports_count = 24
+                
+                # После получения количества портов загружаем порты
+                self.load_ports_from_data()
             
-            # Заполняем порты
-            for port in ports:
-                port_num = port.get("port_num", 0)
-                if port_num > 0:
-                    row_idx = port_num - 1
-                    
-                    # Колонка "Порт"
-                    port_item = QTableWidgetItem(str(port_num))
-                    self.ports_table.setItem(row_idx, 0, port_item)
-                    
-                    # Колонка "Описание"
-                    desc_item = QTableWidgetItem(port.get("description", ""))
-                    
-                    # Проверяем, есть ли флаг bold
-                    if port.get("bold", False):
-                        font = desc_item.font()
-                        font.setBold(True)
-                        desc_item.setFont(font)
-                    
-                    self.ports_table.setItem(row_idx, 1, desc_item)
+            if hasattr(self.parent_window, 'pending_requests'):
+                self.parent_window.pending_requests[request_id] = on_model_data_response
+            else:
+                self.pending_requests[request_id] = on_model_data_response
         else:
-            # Если портов нет, создаём пустую таблицу на 24 порта
-            self.ports_table.setRowCount(24)
-            for i in range(24):
-                port_item = QTableWidgetItem(str(i + 1))
+            # Если не удалось отправить запрос, загружаем порты сразу
+            self.load_ports_from_data()
+    
+    def load_ports_from_data(self):
+        """Загружает порты из данных свитча, показывая ВСЕ порты"""
+        ports = self.switch_data.get("ports", [])
+        
+        # Создаем словарь портов для быстрого поиска
+        ports_dict = {}
+        max_port_num = 0
+        
+        for port in ports:
+            # Поддержка как "number", так и "port_num"
+            port_num_str = str(port.get("number", port.get("port_num", "")))
+            if port_num_str:
+                ports_dict[port_num_str] = port
+                # Пытаемся извлечь числовую часть для определения максимума
+                try:
+                    # Извлекаем число из строки типа "17м"
+                    num_match = re.match(r'(\d+)', port_num_str)
+                    if num_match:
+                        num = int(num_match.group(1))
+                        max_port_num = max(max_port_num, num)
+                except (ValueError, AttributeError):
+                    pass
+        
+        # Используем количество портов из модели, но не меньше максимального из данных
+        if max_port_num > self.ports_count:
+            self.ports_count = max_port_num
+        
+        # Устанавливаем количество строк
+        self.ports_table.setRowCount(self.ports_count)
+        
+        # Заполняем ВСЕ порты
+        for i in range(self.ports_count):
+            port_num = str(i + 1)
+            
+            # Колонка "Порт" - всегда стандартный цвет
+            port_item = QTableWidgetItem(port_num)
+            self.ports_table.setItem(i, 0, port_item)
+            
+            # Колонка "Описание"
+            port_data = ports_dict.get(port_num, None)
+            
+            if port_data:
+                # Порт с данными
+                description = port_data.get("description", "")
+                color = port_data.get("color", "#FFC107")
+                bold = port_data.get("bold", False)
+                
+                desc_item = QTableWidgetItem(description)
+                
+                # ИСПРАВЛЕНО: Применяем цвет только к описанию
+                desc_item.setForeground(QColor(color))
+                
+                # ИСПРАВЛЕНО: Применяем жирность только к описанию
+                if bold:
+                    font = desc_item.font()
+                    font.setBold(True)
+                    desc_item.setFont(font)
+            else:
+                # Порт без данных - пустое описание
                 desc_item = QTableWidgetItem("")
-                self.ports_table.setItem(i, 0, port_item)
-                self.ports_table.setItem(i, 1, desc_item)
+                desc_item.setForeground(QColor("#FFC107"))
+            
+            self.ports_table.setItem(i, 1, desc_item)
     
     def validate_ip(self, ip):
         """Валидация IP-адреса"""
@@ -487,7 +575,7 @@ class SwitchEditDialog(QDialog):
             self.switch_data["last_editor"] = self.parent_window.current_user
         self.switch_data["mod_time"] = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
         
-        # ИЗМЕНЕНО: Сохранение портов из 2 колонок
+        # ИСПРАВЛЕНО: Сохранение ВСЕХ портов с их атрибутами
         ports = []
         for i in range(self.ports_table.rowCount()):
             port_item = self.ports_table.item(i, 0)
@@ -497,23 +585,27 @@ class SwitchEditDialog(QDialog):
                 port_num_text = port_item.text().strip()
                 desc_text = desc_item.text().strip()
                 
-                # Сохраняем только если есть номер порта или описание
-                if port_num_text or desc_text:
-                    try:
-                        port_num = int(port_num_text) if port_num_text else (i + 1)
-                    except ValueError:
-                        port_num = i + 1
-                    
-                    # Проверяем жирный шрифт
+                # Сохраняем порт, если есть номер
+                if port_num_text:
+                    # Получаем цвет и жирность из описания
+                    color = desc_item.foreground().color().name()
                     font = desc_item.font()
                     is_bold = font.bold()
                     
-                    if desc_text:  # Сохраняем только если есть описание
-                        ports.append({
-                            "port_num": port_num,
-                            "description": desc_text,
-                            "bold": is_bold
-                        })
+                    port_data = {
+                        "number": port_num_text,
+                        "description": desc_text
+                    }
+                    
+                    # Добавляем цвет, если он не по умолчанию
+                    if color != "#ffc107":  # Qt возвращает в нижнем регистре
+                        port_data["color"] = color.upper()
+                    
+                    # Добавляем bold, если установлен
+                    if is_bold:
+                        port_data["bold"] = True
+                    
+                    ports.append(port_data)
         
         self.switch_data["ports"] = ports
     
@@ -528,6 +620,7 @@ class SwitchEditDialog(QDialog):
         
         # Колонка "Описание"
         desc_item = QTableWidgetItem("")
+        desc_item.setForeground(QColor("#FFC107"))
         self.ports_table.setItem(row, 1, desc_item)
         
         self.ports_table.editItem(desc_item)
@@ -540,22 +633,24 @@ class SwitchEditDialog(QDialog):
             port_item = self.ports_table.item(current_row, 0)
             desc_item = self.ports_table.item(current_row, 1)
             
-            if port_item:
-                port_item.setText("")
             if desc_item:
                 desc_item.setText("")
+                desc_item.setForeground(QColor("#FFC107"))
+                # Убираем жирность
+                font = desc_item.font()
+                font.setBold(False)
+                desc_item.setFont(font)
     
     def toggle_bold_port(self):
         """Переключение жирного шрифта для выбранного порта"""
         current_row = self.ports_table.currentRow()
         if current_row >= 0:
-            # Применяем жирный шрифт к обеим колонкам
-            for col in [0, 1]:
-                item = self.ports_table.item(current_row, col)
-                if item:
-                    font = item.font()
-                    font.setBold(not font.bold())
-                    item.setFont(font)
+            # ИСПРАВЛЕНО: Применяем жирный шрифт ТОЛЬКО к описанию (колонка 1)
+            desc_item = self.ports_table.item(current_row, 1)
+            if desc_item:
+                font = desc_item.font()
+                font.setBold(not font.bold())
+                desc_item.setFont(font)
     
     def apply_styles(self):
         """Применение стилей в стиле приложения"""

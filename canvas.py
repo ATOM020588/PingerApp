@@ -642,7 +642,7 @@ class MapCanvas(QGraphicsView):
         font = text_item.font()
         # ИСПРАВЛЕНИЕ 4: Увеличиваем шрифт с 10 до 11
         font.setPixelSize(11)
-        font.setBold(True)
+        font.setBold(False)
         text_item.setFont(font)
         
         # Получаем размеры текста
@@ -651,8 +651,8 @@ class MapCanvas(QGraphicsView):
         text_height = text_rect.height()
         
         # ИСПРАВЛЕНИЕ: Уменьшаем отступы квадрата от текста
-        padding_horizontal = 1
-        padding_vertical = 0
+        padding_horizontal = 0.5
+        padding_vertical = 0.5
         
         rect_width = text_width + 2 * padding_horizontal
         rect_height = text_height + 2 * padding_vertical
