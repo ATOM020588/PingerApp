@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QTableWidget, QTableWidgetItem,
     QHeaderView, QComboBox, QTextEdit
 )
-from PyQt6.QtGui import QAction, QColor, QBrush, QPen, QPainter, QPixmap, QFontMetrics, QFont
+from PyQt6.QtGui import QAction, QColor, QBrush, QPen, QPainter, QPixmap, QFontMetrics, QFont, QTextOption
 from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF
 
 from widgets import SwitchInfoDialog, PlanSwitchInfoDialog, AddPlanedSwitch, SwitchEditDialog
@@ -340,6 +340,9 @@ class MapCanvas(QGraphicsView):
                 font.setPixelSize(12)
                 font.setBold(True)
                 text_item.setFont(font)
+                # Установка выравнивания по центру
+                text_item.document().setDefaultTextOption(QTextOption(Qt.AlignmentFlag.AlignCenter))
+                text_item.setTextWidth(text_item.boundingRect().width())
                 text_item.setPos(x - text_item.boundingRect().width()/2, y + h/2 + 2)
                 text_item.setZValue(4)
                 items.append(text_item)

@@ -890,9 +890,40 @@ class MainWindow(QMainWindow):
         self.update_tabs()
 
     def switch_tab(self, index):
-        if index >= 0 and index < len(self.open_maps) and self.open_maps[index]["id"] != self.active_map_id:
-            self.active_map_id = self.open_maps[index]["id"]
+        if index < 0 or index >= len(self.open_maps):
+            return
+
+        new_map_id = self.open_maps[index]["id"]
+
+        # --- Если переключаем вкладку и был включён edit mode ---
+        if self.is_edit_mode:
+            # 1) Выключаем режим редактирования
+            self.is_edit_mode = False
+
+            # 2) Сохраняем текущую карту
+            if self.active_map_id:
+                self.save_map()
+
+            # 3) Обновляем кнопку "Редактировать" (возвращаем стиль)
+            self.edit_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #333;
+                    color: #FFC107;
+                    font-size: 12px;
+                    border: none;
+                    border-radius: 2px;
+                    padding: 5px;
+                }
+                QPushButton:hover { background-color: #FFC107; color: #333; }
+                QPushButton:pressed { background-color: #FFC107; color: #333; }
+            """)
+
+        # --- Активируем выбранную карту ---
+        if new_map_id != self.active_map_id:
+            self.active_map_id = new_map_id
             self.update_tabs()
+            self.update_status_bar()
+
 
     def open_map(self, map_id, is_initial_load=False):
         """ИСПРАВЛЕНО: Загружает карту и принудительно обновляет Canvas"""
