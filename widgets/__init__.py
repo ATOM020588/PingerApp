@@ -8,6 +8,7 @@ from .engineers_management import EngineersManagementDialog
 from .operators_dialog import OperatorsDialog
 from .models_management import ModelsManagementDialog
 from .switch_edit_dialog import SwitchEditDialog
+from .add_switch import AddSwitchDialog
 
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "EngineersManagementDialog",
     "OperatorsDialog",
     "ModelsManagementDialog",
-    "SwitchEditDialog"
+    "SwitchEditDialog",
+    "AddSwitchDialog"
 ]

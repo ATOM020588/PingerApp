@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QAction, QColor, QBrush, QPen, QPainter, QPixmap, QFontMetrics, QFont, QTextOption
 from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF
 
-from widgets import SwitchInfoDialog, PlanSwitchInfoDialog, AddPlanedSwitch, SwitchEditDialog
+from widgets import SwitchInfoDialog, PlanSwitchInfoDialog, AddPlanedSwitch, SwitchEditDialog, AddSwitchDialog
 
 
 
@@ -1054,6 +1054,46 @@ class MapCanvas(QGraphicsView):
         dialog = AddPlanedSwitch(self, scene_pos)
         dialog.exec()
 
+    def add_managed_switch(self, position):
+        """Открыть диалог добавления управляемого свитча"""
+        from PyQt6.QtWidgets import QDialog
+        
+        dialog = AddSwitchDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Получаем данные из диалога
+            new_switch = {
+                "id": self.get_next_id("switches"),
+                "name": dialog.name_combo.currentText(),
+                "model": dialog.model_combo.currentText(),
+                "vlan": dialog.vlan_combo.currentText(),
+                "master": dialog.master_combo.currentText(),
+                "mag_ports": dialog.mag_ports_edit.text(),
+                "uplink": dialog.uplink_edit.text(),
+                "mac": dialog.mac_edit.text(),
+                "ip": dialog.ip_edit.text(),
+                "serial": dialog.serial_edit.text(),
+                "password": dialog.password_edit.text(),
+                "x": str(position.x()),
+                "y": str(position.y()),
+                "pingok": "true",
+                "notinstalled": "0",
+                "notsettings": "0"
+            }
+            
+            # Добавляем в map_data
+            if "switches" not in self.map_data:
+                self.map_data["switches"] = []
+            self.map_data["switches"].append(new_switch)
+            
+            # Перерисовываем карту
+            self.render_map()
+            
+            # Сохраняем изменения
+            self.parent.save_map(self.map_data)
+            self.show_status_saved()
+            
+            self.show_message(f"Свитч '{new_switch['name']}' добавлен")
+    
     def add_node(self, node_type, position):
         scene_pos = self.mapToScene(position)
         print(f"Adding {node_type} at ({scene_pos.x()}, {scene_pos.y()})")
@@ -1110,10 +1150,24 @@ class MapCanvas(QGraphicsView):
 
         add_menu = menu.addMenu("Добавить")
         add_menu.setEnabled(self.is_edit_mode)
-        for text, typ in [("Упр. свитч", "switch"), ("Планируемый свитч", "plan_switch"), ("Клиент", "user"), ("Мыльница", "soap"), ("Таблица", "legend")]:
+
+        for text, typ in [
+            ("Упр. свитч", "switch"), 
+            ("Планируемый свитч", "plan_switch"), 
+            ("Клиент", "user"), 
+            ("Мыльница", "soap"), 
+            ("Таблица", "legend")
+        ]:
             action = add_menu.addAction(text)
             action.setEnabled(self.is_edit_mode)
-            action.triggered.connect(lambda _, t=typ: self.add_node(t, position) if t != "plan_switch" else self.add_planed_switch(position))
+            
+            # Разделяем обработку для разных типов
+            if text == "Упр. свитч":
+                action.triggered.connect(lambda: self.add_managed_switch(position))
+            elif text == "Планируемый свитч":
+                action.triggered.connect(lambda: self.add_planed_switch(position))
+            else:
+                action.triggered.connect(lambda _, t=typ: self.add_node(t, position))
 
         settings = menu.addAction("Параметры карты")
         settings.setEnabled(self.is_edit_mode)

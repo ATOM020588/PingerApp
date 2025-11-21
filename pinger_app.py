@@ -262,7 +262,8 @@ from widgets import (
     FirmwareManagementDialog,
     EngineersManagementDialog,
     OperatorsDialog,
-    ModelsManagementDialog
+    ModelsManagementDialog,
+    AddSwitchDialog
 )
 
 #   ===Импорт класса MapCanvas===
