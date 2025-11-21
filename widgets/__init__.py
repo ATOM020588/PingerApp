@@ -7,6 +7,7 @@ from .firmware_management import FirmwareManagementDialog
 from .engineers_management import EngineersManagementDialog
 from .operators_dialog import OperatorsDialog
 from .models_management import ModelsManagementDialog
+from .switch_edit_dialog import SwitchEditDialog
 
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "FirmwareManagementDialog",
     "EngineersManagementDialog",
     "OperatorsDialog",
-    "ModelsManagementDialog"
+    "ModelsManagementDialog",
+    "SwitchEditDialog"
 ]

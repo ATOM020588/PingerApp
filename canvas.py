@@ -1,4 +1,4 @@
-# canvas.py — ИСПРАВЛЕНО: выделение и перемещение точек магистралей
+# canvas.py — ИСПРАВЛЕНО: выделение и перемещение точек магистралей + overlay copy.png
 # Автор: Grok / E1 / AI Assistant
 # Обновлено: January 2025
 
@@ -17,9 +17,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QAction, QColor, QBrush, QPen, QPainter, QPixmap
 from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF
 
-from widgets import SwitchInfoDialog, PlanSwitchInfoDialog, AddPlanedSwitch
+from widgets import SwitchInfoDialog, PlanSwitchInfoDialog, AddPlanedSwitch, SwitchEditDialog
 
-from switch_edit_dialog import SwitchEditDialog
+
 
 
 # НОВЫЙ КЛАСС: Перемещаемая желтая точка магистрали
@@ -120,7 +120,15 @@ class MapCanvas(QGraphicsView):
 
     # === КООРДИНАТЫ — ЕДИНЫЙ ИСТОЧНИК: xy["x"], xy["y"] ===
     def get_node_xy(self, node, ntype):
-        """Возвращает (x, y) — ВСЕГДА из xy"""
+        """Возвращает (x, y) — ВСЕГДА из xy
+        
+        ИСПРАВЛЕНИЕ: Обработка объектов MagistralPoint
+        """
+        if ntype == "magistral_point":
+            # Для точек магистрали возвращаем позицию из QGraphicsItem
+            pos = node.pos()
+            return pos.x(), pos.y()
+        # Для обычных узлов возвращаем из словаря
         return node["xy"]["x"], node["xy"]["y"]
 
     def set_node_xy(self, node, ntype, x, y):
@@ -247,6 +255,12 @@ class MapCanvas(QGraphicsView):
                     elif node.get("notsettings") == "-1":
                         image_path = "canvas/Router.png"
                         overlay_path = "canvas/other/not_settings.png"
+                    
+                    # 4. НОВОЕ: Копия (copyid установлен и не "none")
+                    elif node.get("copyid") and node.get("copyid") not in ["none", ""]:
+                        # Если нет других overlay, показываем copy.png
+                        if not overlay_path:
+                            overlay_path = "canvas/other/copy.png"
 
                 elif node_type == "plan_switch":
                     image_path = "canvas/Router_plan.png"
@@ -285,6 +299,36 @@ class MapCanvas(QGraphicsView):
                     overlay_item.setPos(x - w/2, y - h/2)
                     overlay_item.setZValue(3)
                     items.append(overlay_item)
+                # ——— ИНДИКАТОР MAYAKUP (только для switch) ———
+                if node_type == "switch" and "mayakup" in node:
+                    mayakup_value = node.get("mayakup")
+                    # Определяем цвет: зеленый если true, красный если false
+                    if mayakup_value is True:
+                        indicator_color = QColor("#00ff00")  # Зеленый
+                    elif mayakup_value is False:
+                        indicator_color = QColor("#ff0000")  # Красный
+                    else:
+                        indicator_color = None
+                    
+                    # Рисуем круг только если цвет определен
+                    if indicator_color:
+                        # Радиус 5px, диаметр 10px
+                        radius = 5
+                        # Позиция: правый верхний угол иконки
+                        circle_x = x
+                        circle_y = y
+                        
+                        # Создаем круг
+                        circle_item = self.scene.addEllipse(
+                            circle_x - radius, 
+                            circle_y - radius, 
+                            radius * 2, 
+                            radius * 2,
+                            pen=QPen(indicator_color, 1),
+                            brush=QBrush(indicator_color)
+                        )
+                        circle_item.setZValue(5)  # Поверх всего
+                        items.append(circle_item)
 
                 # ——— ПОДПИСЬ ———
                 text = node.get("name") or node.get("text") or ""
@@ -352,6 +396,8 @@ class MapCanvas(QGraphicsView):
             main_item = next((i for i in items if isinstance(i, QGraphicsPixmapItem) or isinstance(i, QGraphicsRectItem)), None)
             text_item = next((i for i in items if isinstance(i, QGraphicsTextItem)), None)
             overlay_item = next((i for i in items if isinstance(i, QGraphicsPixmapItem) and i != main_item), None)
+            # ИСПРАВЛЕНИЕ: Находим индикатор MAYAKUP (круг)
+            mayakup_circle = next((i for i in items if isinstance(i, QGraphicsEllipseItem)), None)
 
             if isinstance(main_item, QGraphicsPixmapItem):
                 w, h = main_item.pixmap().width(), main_item.pixmap().height()
@@ -361,6 +407,11 @@ class MapCanvas(QGraphicsView):
             elif isinstance(main_item, QGraphicsRectItem):
                 w, h = 15, 13
                 main_item.setRect(x - 7.5, y - 6.5, w, h)
+
+            # ИСПРАВЛЕНИЕ: Обновляем позицию индикатора MAYAKUP
+            if mayakup_circle:
+                radius = 5
+                mayakup_circle.setRect(x - radius, y - radius, radius * 2, radius * 2)
 
             if text_item:
                 text_item.setPos(x - text_item.boundingRect().width()/2, y + h/2 + 15)
@@ -386,17 +437,17 @@ class MapCanvas(QGraphicsView):
 
     def refresh_magistrals_only(self):
         """Обновляет только линии магистралей без пересоздания точек"""
-        # Удаляем только линии
+        # Удаляем линии, прямоугольники и текстовые элементы, но НЕ точки (MagistralPoint)
         for item in self.magistral_items[:]:
             try:
-                if isinstance(item, QGraphicsLineItem) and item.scene():
+                if not isinstance(item, MagistralPoint) and item.scene():
                     self.scene.removeItem(item)
             except (RuntimeError, AttributeError):
                 # Объект уже удалён
                 pass
         
         # Фильтруем список, сохраняя только точки
-        self.magistral_items = [item for item in self.magistral_items if not isinstance(item, QGraphicsLineItem)]
+        self.magistral_items = [item for item in self.magistral_items if isinstance(item, MagistralPoint)]
         
         # Перерисовываем линии
         import re
@@ -434,6 +485,9 @@ class MapCanvas(QGraphicsView):
                 line = self.scene.addLine(points[i][0], points[i][1], points[i+1][0], points[i+1][1], pen)
                 line.setZValue(0)
                 self.magistral_items.append(line)
+            
+            # НОВОЕ: Отображение номеров портов на магистралях
+            self.draw_magistral_port_labels(link, points)
 
     def update_magistrals(self):
         # Очистка старого
@@ -496,6 +550,9 @@ class MapCanvas(QGraphicsView):
                 line.setZValue(0)
                 self.magistral_items.append(line)
 
+            # НОВОЕ: Отображение номеров портов на магистралях
+            self.draw_magistral_port_labels(link, points)
+
             # ЖЕЛТЫЕ ТОЧКИ — ИСПРАВЛЕНО: используем новый класс MagistralPoint
             if self.is_edit_mode and len(points) > 2:
                 for idx in range(1, len(points) - 1):
@@ -510,6 +567,115 @@ class MapCanvas(QGraphicsView):
                     # Сохраняем
                     self.magistral_points[(link["id"], idx)] = dot
                     self.magistral_items.append(dot)
+    
+    def draw_magistral_port_labels(self, link, points):
+        """Отрисовка подписей портов на магистралях"""
+        if len(points) < 2:
+            return
+        
+        # Получаем данные портов
+        start_port = link.get("startport", "")
+        end_port = link.get("endport", "")
+        
+        # ИСПРАВЛЕНИЕ 1: Фильтрация портов с номером 0
+        # Преобразуем в строку и проверяем значение
+        if str(start_port).strip() == "0":
+            start_port = ""
+        if str(end_port).strip() == "0":
+            end_port = ""
+        
+        # Если нет данных о портах, ничего не рисуем
+        if not start_port and not end_port:
+            return
+        
+        # ИСПРАВЛЕНИЕ 2: Используем цвет порта из startportcolor/endportcolor
+        start_color = link.get("startportcolor", "#FFC107")
+        end_color = link.get("endportcolor", "#FFC107")
+        
+        start_far = float(link.get("startportfar", 10))
+        end_far = float(link.get("endportfar", 10))
+        
+        # Рисуем подпись начального порта
+        if start_port:
+            self.draw_port_label(
+                start_port, 
+                points[0], 
+                points[1], 
+                start_color,  # Цвет из startportcolor
+                start_far, 
+                is_start=True
+            )
+        
+        # Рисуем подпись конечного порта
+        if end_port:
+            self.draw_port_label(
+                end_port, 
+                points[-1], 
+                points[-2], 
+                end_color,  # Цвет из endportcolor
+                end_far, 
+                is_start=False
+            )
+    
+    def draw_port_label(self, port_text, pos, neighbor_pos, color, distance, is_start=True):
+        """Рисует подпись порта с прямоугольником"""
+        # ИСПРАВЛЕНИЕ: Вычисляем направление ОТ узла К соседней точке (вдоль магистрали)
+        dx = neighbor_pos[0] - pos[0]
+        dy = neighbor_pos[1] - pos[1]
+        length = math.sqrt(dx*dx + dy*dy)
+        
+        if length == 0:
+            return
+        
+        # Нормализуем направление
+        dx /= length
+        dy /= length
+        
+        # Позиционируем подпись ВДОЛЬ магистрали на расстоянии distance от узла
+        # Двигаемся от узла в сторону соседней точки (вдоль линии магистрали)
+        text_x = pos[0] + dx * distance
+        text_y = pos[1] + dy * distance
+        
+        # Создаем текст
+        text_item = self.scene.addText(str(port_text))
+        text_item.setDefaultTextColor(QColor(color))
+        font = text_item.font()
+        # ИСПРАВЛЕНИЕ 4: Увеличиваем шрифт с 10 до 11
+        font.setPixelSize(11)
+        font.setBold(True)
+        text_item.setFont(font)
+        
+        # Получаем размеры текста
+        text_rect = text_item.boundingRect()
+        text_width = text_rect.width()
+        text_height = text_rect.height()
+        
+        # ИСПРАВЛЕНИЕ: Уменьшаем отступы квадрата от текста
+        padding_horizontal = 1
+        padding_vertical = 0
+        
+        rect_width = text_width + 2 * padding_horizontal
+        rect_height = text_height + 2 * padding_vertical
+        
+        # Центрируем прямоугольник относительно text_x, text_y
+        rect_x = text_x - rect_width / 2
+        rect_y = text_y - rect_height / 2
+        
+        # ИСПРАВЛЕНИЕ 2: Рисуем рамку цветом порта (startportcolor/endportcolor)
+        rect_item = self.scene.addRect(
+            rect_x, rect_y, rect_width, rect_height,
+            pen=QPen(QColor(color), 1),
+            brush=QBrush(QColor("#008080"))
+        )
+        rect_item.setZValue(10)  # Поверх магистрали
+        
+        # Позиционируем текст с учетом отступов
+        text_item.setPos(rect_x + padding_horizontal, rect_y + padding_vertical)
+        text_item.setZValue(11)  # Поверх прямоугольника
+        
+        # Добавляем в список элементов магистрали
+        self.magistral_items.append(rect_item)
+        self.magistral_items.append(text_item)
 
     # === МЫШЬ ===
     def mousePressEvent(self, event):
@@ -552,11 +718,21 @@ class MapCanvas(QGraphicsView):
                     if clicked_on_selected:
                         self.drag_group = True
                         self.drag_start_pos = scene_pos
-                        self.group_drag_offset = [
-                            (scene_pos.x() - self.get_node_xy(n[0], n[1])[0],
-                             scene_pos.y() - self.get_node_xy(n[0], n[1])[1])
-                            for n in self.selected_nodes
-                        ]
+                        # ИСПРАВЛЕНИЕ: Учитываем точки магистралей при расчете смещений
+                        self.group_drag_offset = []
+                        for node, ntype, key_data in self.selected_nodes:
+                            if ntype == "magistral_point":
+                                # Для точки магистрали берем её текущую позицию
+                                pos = node.pos()
+                                self.group_drag_offset.append(
+                                    (scene_pos.x() - pos.x(), scene_pos.y() - pos.y())
+                                )
+                            else:
+                                # Для обычных узлов
+                                x, y = self.get_node_xy(node, ntype)
+                                self.group_drag_offset.append(
+                                    (scene_pos.x() - x, scene_pos.y() - y)
+                                )
                         self.update_selection_graphics()
                         return
 
@@ -599,11 +775,18 @@ class MapCanvas(QGraphicsView):
         if self.drag_group:
             dx = scene_pos.x() - self.drag_start_pos.x()
             dy = scene_pos.y() - self.drag_start_pos.y()
-            for (node, ntype, _), (ox, oy) in zip(self.selected_nodes, self.group_drag_offset):
+            for (node, ntype, key_data), (ox, oy) in zip(self.selected_nodes, self.group_drag_offset):
                 new_x = self.drag_start_pos.x() - ox + dx
                 new_y = self.drag_start_pos.y() - oy + dy
-                self.set_node_xy(node, ntype, new_x, new_y)
-                self.update_node_graphics(node, ntype)
+                # ИСПРАВЛЕНИЕ: Обрабатываем точки магистралей отдельно
+                if ntype == "magistral_point":
+                    # Для точки магистрали устанавливаем позицию напрямую
+                    node.setPos(new_x, new_y)
+                    # Обновление данных произойдет через itemChange
+                else:
+                    # Обычные узлы
+                    self.set_node_xy(node, ntype, new_x, new_y)
+                    self.update_node_graphics(node, ntype)
             self.update_magistrals()
             self.update_selection_graphics()
             event.accept()
@@ -718,6 +901,17 @@ class MapCanvas(QGraphicsView):
                 item_rect = self.get_node_rect(item, ntype)
                 if rect.contains(item_rect):
                     self.selected_nodes.append((item, ntype, key))
+        
+        # ИСПРАВЛЕНИЕ: Добавляем точки магистралей в выделение
+        if self.is_edit_mode:
+            for (link_id, idx), point in self.magistral_points.items():
+                if point and point.scene():
+                    point_pos = point.pos()
+                    point_rect = QRectF(point_pos.x() - 5, point_pos.y() - 5, 10, 10)
+                    if rect.intersects(point_rect):
+                        # Добавляем точку как особый тип "magistral_point"
+                        self.selected_nodes.append((point, "magistral_point", (link_id, idx)))
+        
         self.update_selection_graphics()
 
     def update_selection_graphics(self):
@@ -727,11 +921,23 @@ class MapCanvas(QGraphicsView):
         padding = 2
         pen = QPen(QColor("#FFC107"), 1, Qt.PenStyle.DashLine)
         pen.setDashPattern([2, 2])
-        for node, ntype, _ in self.selected_nodes:
-            r = self.get_node_rect(node, ntype).adjusted(-padding, -padding, padding, padding)
-            border = self.scene.addRect(r, pen=pen)
-            border.setZValue(999)
-            self.selection_graphics.append(border)
+        for node, ntype, key_data in self.selected_nodes:
+            # ИСПРАВЛЕНИЕ: Обрабатываем точки магистралей отдельно
+            if ntype == "magistral_point":
+                # Рисуем круг вокруг точки магистрали
+                point_pos = node.pos()
+                circle_border = self.scene.addEllipse(
+                    point_pos.x() - 6, point_pos.y() - 6, 12, 12,
+                    pen=pen
+                )
+                circle_border.setZValue(1000)
+                self.selection_graphics.append(circle_border)
+            else:
+                # Обычные узлы
+                r = self.get_node_rect(node, ntype).adjusted(-padding, -padding, padding, padding)
+                border = self.scene.addRect(r, pen=pen)
+                border.setZValue(999)
+                self.selection_graphics.append(border)
 
     def clear_selection_graphics(self):
         for item in self.selection_graphics[:]:
@@ -780,6 +986,15 @@ class MapCanvas(QGraphicsView):
         return closest
 
     def get_node_rect(self, node, ntype):
+        """Возвращает прямоугольник узла
+        
+        ИСПРАВЛЕНИЕ: Обработка объектов MagistralPoint
+        """
+        if ntype == "magistral_point":
+            # Для точек магистрали возвращаем небольшой прямоугольник вокруг точки
+            pos = node.pos()
+            return QRectF(pos.x() - 5, pos.y() - 5, 10, 10)
+        
         x, y = self.get_node_xy(node, ntype)
         if ntype == "legend":
             w = float(node.get("width", 100))
@@ -1093,7 +1308,7 @@ class MapCanvas(QGraphicsView):
 
     def edit_switch(self, node, ntype):
         """Открыть диалог редактирования свитча"""
-        from switch_edit_dialog import SwitchEditDialog
+        from widgets import SwitchEditDialog
         
         if ntype not in ["switch", "user", "soap"]:
             self.show_message(f"Редактирование для типа '{ntype}' не поддерживается")

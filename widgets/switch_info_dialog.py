@@ -1,4 +1,3 @@
-# widgets/switch_info_dialog.py
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidgetItem, QMessageBox, QApplication,
     QTableWidget, QHeaderView, QTextEdit
@@ -19,7 +18,7 @@ class SwitchInfoDialog(QDialog):
         switch_name = switch_data.get("name", "Без названия")
         self.setWindowTitle(switch_name)
 
-        self.setFixedSize(800, 600)
+        self.setFixedSize(650, 700)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         self.setModal(False)
 
@@ -49,8 +48,8 @@ class SwitchInfoDialog(QDialog):
         # Статус
         status = "UP" if self.switch_data.get("pingok") else "DOWN"
         status_color = "#4CAF50" if self.switch_data.get("pingok") else "#F44336"
-        status_label = QLabel(f"<b>Статус:</b> <span style='color:{status_color}'>{status}</span>")
-        top_info_layout.addWidget(status_label)
+        self.status_label = QLabel(f"<b>Статус:</b> <span style='color:{status_color}'>{status}</span>")
+        top_info_layout.addWidget(self.status_label)
 
         # MAC
         mac = self.switch_data.get('mac', '—')
@@ -96,14 +95,16 @@ class SwitchInfoDialog(QDialog):
         ports_table.setHorizontalHeaderLabels(["Порт", "Описание"])
         ports_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         ports_table.verticalHeader().setVisible(False)
-
-        header = ports_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        ports_table.setColumnWidth(0, 20)
+        
+        # Включаем горизонтальную прокрутку
+        ports_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        ports_table.setHorizontalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
 
         ports = self.switch_data.get("ports", [])
         ports_table.setRowCount(len(ports))
+
+        # Переменная для хранения максимальной ширины текста в колонке "Порт"
+        max_port_width = 0
 
         for i, port in enumerate(ports):
             num_item = QTableWidgetItem(str(port.get("number", "")))
@@ -112,16 +113,55 @@ class SwitchInfoDialog(QDialog):
             color = port.get("color", "#FFC107")
             bold = port.get("bold", False)
 
-            for item in (num_item, desc_item):
-                item.setForeground(QColor(color))
-                if bold:
-                    f = item.font()
-                    f.setBold(True)
-                    item.setFont(f)
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            # Номер порта ВСЕГДА желтый (#FFC107)
+            num_item.setForeground(QColor("#FFC107"))
+            num_item.setFlags(num_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            
+            # Описание использует цвет из данных
+            desc_item.setForeground(QColor(color))
+            desc_item.setFlags(desc_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            
+            # Жирный шрифт применяется к обоим (если указан)
+            if bold:
+                f_num = num_item.font()
+                f_num.setBold(False)
+                num_item.setFont(f_num)
+                
+                f_desc = desc_item.font()
+                f_desc.setBold(True)
+                desc_item.setFont(f_desc)
 
             ports_table.setItem(i, 0, num_item)
             ports_table.setItem(i, 1, desc_item)
+            
+            # Вычисляем ширину текста для данного порта
+            font_metrics = num_item.font()
+            from PyQt6.QtGui import QFontMetrics
+            metrics = QFontMetrics(font_metrics)
+            text_width = metrics.horizontalAdvance(str(port.get("number", "")))
+            max_port_width = max(max_port_width, text_width)
+
+        # Настройка ширины колонок
+        header = ports_table.horizontalHeader()
+        
+        # Вычисляем ширину заголовка "Порт"
+        header_font = header.font()
+        from PyQt6.QtGui import QFontMetrics
+        header_metrics = QFontMetrics(header_font)
+        header_width = header_metrics.horizontalAdvance("Порт")
+        
+        # Берем максимальное значение между шириной данных и шириной заголовка
+        final_port_width = max(max_port_width, header_width) + 30  # +30px для отступов (по 15px слева и справа)
+        
+        # Устанавливаем фиксированную ширину для колонки "Порт"
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        ports_table.setColumnWidth(0, final_port_width)
+        
+        # Колонка "Описание" растягивается, но может быть с прокруткой
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        
+        # Устанавливаем минимальную ширину для колонки "Описание"
+        ports_table.setColumnWidth(1, 340)
 
         right.addWidget(QLabel("<b>Порты:</b>"))
         right.addWidget(ports_table, 1)
@@ -167,12 +207,24 @@ class SwitchInfoDialog(QDialog):
             self.image_label.setText("<i>Модель не указана</i>")
             return
 
-        model_clean = re.sub(r'[^\w.-]', '', model).replace(" ", "_").lower()
+        # ИСПРАВЛЕНИЕ: Правильный порядок обработки имени модели
+        # 1. Сначала заменяем пробелы на подчеркивания
+        model_clean = model.replace(" ", "_")
+        # 2. Затем удаляем/заменяем недопустимые символы (оставляем буквы, цифры, дефис, точку, подчеркивание)
+        model_clean = re.sub(r'[^\w.-]', '_', model_clean)
+        # 3. НЕ делаем lower() - сохраняем оригинальный регистр
 
+        # Создаем список кандидатов с учетом возможных вариантов регистра
         candidates = [
+            # Точное соответствие (с сохранением регистра)
             f"model_{model_clean}.png",
             f"model_{model_clean}.jpg",
             f"model_{model_clean}.jpeg",
+            # Вариант в нижнем регистре (для обратной совместимости)
+            f"model_{model_clean.lower()}.png",
+            f"model_{model_clean.lower()}.jpg",
+            f"model_{model_clean.lower()}.jpeg",
+            # Дополнительные форматы
             f"model_{model_clean}.bmp",
             f"model_{model_clean}.gif",
         ]
@@ -219,18 +271,56 @@ class SwitchInfoDialog(QDialog):
             ok = resp.get("success", False)
             self.switch_data["pingok"] = ok
 
-            main_window = self.parent_window.parent()  # ← ВОТ ТАК ПРАВИЛЬНО
+            # ИСПРАВЛЕНО: Правильное получение main_window
+            # Пытаемся получить main_window разными способами
+            main_window = None
+            
+            # Способ 1: parent_window это и есть main_window
+            if hasattr(self.parent_window, 'map_data') and hasattr(self.parent_window, 'active_map_id'):
+                main_window = self.parent_window
+            # Способ 2: parent_window это MapCanvas, его parent - main_window
+            elif hasattr(self.parent_window, 'parent') and callable(self.parent_window.parent):
+                potential_parent = self.parent_window.parent()
+                if potential_parent and hasattr(potential_parent, 'map_data') and hasattr(potential_parent, 'active_map_id'):
+                    main_window = potential_parent
+            
+            # Если main_window не найден, просто показываем сообщение
+            if not main_window or not hasattr(main_window, 'map_data') or not hasattr(main_window, 'active_map_id'):
+                QMessageBox.information(self, "Инфо", "Данные обновлены")
+                return
 
+            # ИСПРАВЛЕНИЕ: Проверяем наличие active_map_id перед обращением к map_data
+            active_map = main_window.active_map_id
+            if not active_map or active_map not in main_window.map_data:
+                QMessageBox.information(self, "Инфо", "Данные обновлены")
+                return
+
+            # Обновляем данные в map_data
             list_key = "switches" if self.switch_data.get("type") != "plan_switch" else "plan_switches"
 
-            for i, s in enumerate(main_window.map_data[list_key]):
+            # ОСНОВНОЕ ИСПРАВЛЕНИЕ: Добавляем active_map_id для корректного обращения к данным
+            # Было: main_window.map_data[list_key]
+            # Стало: main_window.map_data[active_map][list_key]
+            if list_key not in main_window.map_data[active_map]:
+                QMessageBox.information(self, "Инфо", "Данные обновлены")
+                return
+
+            for i, s in enumerate(main_window.map_data[active_map][list_key]):
                 if s["id"] == self.switch_data["id"]:
-                    main_window.map_data[list_key][i] = self.switch_data
+                    main_window.map_data[active_map][list_key][i] = self.switch_data
                     break
 
-            main_window.render_map()
-            self.close()
-            main_window.show_switch_info(self.switch_data)
+            # Перерисовываем карту
+            if hasattr(main_window, 'render_map'):
+                main_window.render_map()
+            
+            # Обновляем отображение статуса в окне
+            self.update_status_display()
+            
+            # Показываем сообщение об успешном обновлении
+            QMessageBox.information(self, "Инфо", "Данные обновлены")
+
+        self.parent_window.pending_requests[req] = callback
 
     # ============================================================
     # Разное
@@ -253,3 +343,9 @@ class SwitchInfoDialog(QDialog):
 
     def show_message(self, text):
         QMessageBox.information(self, "Инфо", text)
+    
+    def update_status_display(self):
+        """Обновляет отображение статуса в окне"""
+        status = "UP" if self.switch_data.get("pingok") else "DOWN"
+        status_color = "#4CAF50" if self.switch_data.get("pingok") else "#F44336"
+        self.status_label.setText(f"<b>Статус:</b> <span style='color:{status_color}'>{status}</span>")

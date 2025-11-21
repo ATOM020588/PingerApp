@@ -1,6 +1,7 @@
 # switch_edit_dialog.py
-# Диалог редактирования свитча
-# Автор: E1
+# Диалог редактирования свитча - ОБНОВЛЕНО
+# Автор: E1 / AI Assistant
+# Обновлено: January 2025
 
 import re
 from PyQt6.QtWidgets import (
@@ -8,7 +9,7 @@ from PyQt6.QtWidgets import (
     QCheckBox, QPushButton, QLabel, QTableWidget, QTableWidgetItem, QComboBox,
     QHeaderView, QSpinBox, QRadioButton, QButtonGroup, QMessageBox
 )
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtCore import Qt
 from datetime import datetime
 
@@ -25,7 +26,14 @@ class SwitchEditDialog(QDialog):
         self.setWindowTitle("Редактирование свитча")
         self.setMinimumSize(1100, 700)
         
+        # Словари для хранения загруженных данных
+        self.models_list = []
+        self.masters_list = []
+        self.pending_requests = {}
+        
         self.init_ui()
+        self.load_models()
+        self.load_masters()
         self.load_data()
         self.apply_styles()
         
@@ -43,27 +51,26 @@ class SwitchEditDialog(QDialog):
         checkbox_layout = QHBoxLayout()
         self.not_installed_cb = QCheckBox("Не установлен")
         self.not_configured_cb = QCheckBox("Недонастроен")
-        self.copy_btn = QPushButton("Копия")
-        self.copy_btn.setMaximumWidth(80)
+        self.copy_cb = QCheckBox("Копия")  # ИЗМЕНЕНО: кнопка -> чекбокс
         checkbox_layout.addWidget(self.not_installed_cb)
         checkbox_layout.addWidget(self.not_configured_cb)
-        checkbox_layout.addWidget(self.copy_btn)
+        checkbox_layout.addWidget(self.copy_cb)
         checkbox_layout.addStretch()
         left_column.addLayout(checkbox_layout)
         
-        # Имя
+        # Имя - ИЗМЕНЕНО: многострочное
         name_layout = QFormLayout()
-        self.name_input = QLineEdit()
+        self.name_input = QTextEdit()
+        self.name_input.setMaximumHeight(60)  # ~3 строки
         name_layout.addRow(QLabel("Имя"), self.name_input)
-        left_column.addLayout(name_layout)
         
         # Модель
         self.model_combo = QComboBox()
         self.model_combo.setEditable(True)
-        self.load_models()
+        self.model_combo.currentTextChanged.connect(self.on_model_changed)
         name_layout.addRow(QLabel("Модель"), self.model_combo)
         
-        # Питание
+        # Питание - ИЗМЕНЕНО: однострочное
         self.power_input = QLineEdit()
         name_layout.addRow(QLabel("Питание"), self.power_input)
         
@@ -73,7 +80,7 @@ class SwitchEditDialog(QDialog):
         
         # Примечание
         self.note_input = QTextEdit()
-        self.note_input.setMaximumHeight(120)
+        self.note_input.setMaximumHeight(150)
         name_layout.addRow(QLabel("Примечание"), self.note_input)
         
         # Последний редактор
@@ -82,9 +89,9 @@ class SwitchEditDialog(QDialog):
         name_layout.addRow(QLabel("Последний редактор"), self.last_editor_input)
         
         left_column.addLayout(name_layout)
-        top_section.addLayout(left_column, 2)
+        top_section.addLayout(left_column, 3)
         
-        # Средняя колонка: IP, Mac, Мастер
+        # Средняя колонка: IP, Mac, Мастер, Время реакции
         middle_column = QVBoxLayout()
         middle_form = QFormLayout()
         
@@ -96,7 +103,6 @@ class SwitchEditDialog(QDialog):
         
         self.master_combo = QComboBox()
         self.master_combo.setEditable(True)
-        self.load_masters()
         middle_form.addRow(QLabel("Мастер"), self.master_combo)
         
         # Время реакции (мин)
@@ -106,7 +112,8 @@ class SwitchEditDialog(QDialog):
         middle_form.addRow(QLabel("Время реакции (мин)"), self.reaction_time_input)
         
         middle_column.addLayout(middle_form)
-        top_section.addLayout(middle_column, 1)
+        middle_column.addStretch()
+        top_section.addLayout(middle_column, 2)
         
         # Правая колонка: Порты
         right_column = QVBoxLayout()
@@ -125,7 +132,7 @@ class SwitchEditDialog(QDialog):
         filter_group.addButton(self.filter_single_rb)
         filter_group.addButton(self.filter_multiple_rb)
         
-        # Кнопки управления портами
+        # Кнопки управления портом
         self.add_port_btn = QPushButton("⊕")
         self.add_port_btn.setMaximumWidth(30)
         self.add_port_btn.setToolTip("Добавить порт")
@@ -148,16 +155,22 @@ class SwitchEditDialog(QDialog):
         
         right_column.addLayout(ports_header)
         
-        # Таблица портов
+        # Таблица портов - ИЗМЕНЕНО: 2 колонки
         self.ports_table = QTableWidget()
-        self.ports_table.setColumnCount(1)
-        self.ports_table.setHorizontalHeaderLabels(["Описание порта"])
-        self.ports_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.ports_table.verticalHeader().setVisible(True)
-        self.ports_table.setMinimumHeight(400)
+        self.ports_table.setColumnCount(2)
+        self.ports_table.setHorizontalHeaderLabels(["Порт", "Описание"])
+        
+        # Настройка колонок как в switch_info_dialog
+        header = self.ports_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.ports_table.setColumnWidth(0, 80)  # Фиксированная ширина для "Порт"
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # "Описание" растягивается
+        
+        self.ports_table.verticalHeader().setVisible(False)
+        self.ports_table.setMinimumHeight(500)
         
         right_column.addWidget(self.ports_table)
-        top_section.addLayout(right_column, 2)
+        top_section.addLayout(right_column, 3)
         
         main_layout.addLayout(top_section)
         
@@ -183,29 +196,153 @@ class SwitchEditDialog(QDialog):
         self.add_port_btn.clicked.connect(self.add_port)
         self.remove_port_btn.clicked.connect(self.remove_port)
         self.bold_port_btn.clicked.connect(self.toggle_bold_port)
-        self.copy_btn.clicked.connect(self.copy_to_clipboard)
         
     def load_models(self):
-        """Загрузка списка моделей"""
-        # TODO: Загрузить из БД через ws_client
-        default_models = [
-            "DES-3200-18 rev C",
-            "DES-3200-28 rev B",
-            "DGS-1100-06/ME",
-            "DGS-1210-10P",
-            "DGS-3120-24TC",
-        ]
-        self.model_combo.addItems(default_models)
+        """Загрузка списка моделей из JSON через WebSocket"""
+        if not self.ws_client:
+            # Fallback к дефолтным значениям
+            default_models = [
+                "DES-3200-18 rev C",
+                "DES-3200-28 rev B",
+                "DGS-1100-06/ME",
+                "DGS-1210-10P",
+                "DGS-3120-24TC",
+            ]
+            self.model_combo.addItems(default_models)
+            return
+        
+        # Запрос списка моделей
+        request_id = self.ws_client.send_request(
+            "file_get",
+            path="data/models/models.json"
+        )
+        
+        if request_id:
+            def on_models_response(data):
+                if data.get("success") and data.get("data"):
+                    models_data = data.get("data", [])
+                    self.models_list = models_data
+                    
+                    # Заполняем комбобокс
+                    self.model_combo.clear()
+                    for model in models_data:
+                        self.model_combo.addItem(model.get("model_name", ""))
+                else:
+                    print(f"Ошибка загрузки моделей: {data.get('error')}")
+            
+            if hasattr(self.parent_window, 'pending_requests'):
+                self.parent_window.pending_requests[request_id] = on_models_response
+            else:
+                self.pending_requests[request_id] = on_models_response
         
     def load_masters(self):
-        """Загрузка списка мастеров"""
-        # TODO: Загрузить из БД через ws_client
-        default_masters = [
-            "Шепель А. В.",
-            "Иванов И. И.",
-            "Петров П. П.",
-        ]
-        self.master_combo.addItems(default_masters)
+        """Загрузка списка мастеров из JSON через WebSocket"""
+        if not self.ws_client:
+            # Fallback к дефолтным значениям
+            default_masters = [
+                "Шепель А. В.",
+                "Иванов И. И.",
+                "Петров П. П.",
+            ]
+            self.master_combo.addItems(default_masters)
+            return
+        
+        # Запрос списка мастеров
+        request_id = self.ws_client.send_request(
+            "file_get",
+            path="data/lists/masters.json"
+        )
+        
+        if request_id:
+            def on_masters_response(data):
+                if data.get("success") and data.get("data"):
+                    masters_data = data.get("data", [])
+                    self.masters_list = masters_data
+                    
+                    # Заполняем комбобокс
+                    self.master_combo.clear()
+                    for master in masters_data:
+                        self.master_combo.addItem(master.get("fio", ""))
+                else:
+                    print(f"Ошибка загрузки мастеров: {data.get('error')}")
+            
+            if hasattr(self.parent_window, 'pending_requests'):
+                self.parent_window.pending_requests[request_id] = on_masters_response
+            else:
+                self.pending_requests[request_id] = on_masters_response
+    
+    def on_model_changed(self, model_name):
+        """Обработчик изменения модели - загружает количество портов"""
+        if not model_name or not self.ws_client:
+            return
+        
+        # Преобразуем имя модели в имя файла
+        # "DES-3200-10 rev C" -> "DES-3200-10_rev_C"
+        model_filename = model_name.replace(" ", "_")
+        
+        # Запрос данных модели
+        request_id = self.ws_client.send_request(
+            "file_get",
+            path=f"data/models/model_{model_filename}.json"
+        )
+        
+        if request_id:
+            def on_model_data_response(data):
+                if data.get("success") and data.get("data"):
+                    model_data = data.get("data", {})
+                    # Получаем ports_count как строку и конвертируем в int
+                    ports_count_str = model_data.get("ports_count", "24")
+                    try:
+                        ports_count = int(ports_count_str)
+                    except (ValueError, TypeError):
+                        ports_count = 24
+                    
+                    # Обновляем количество портов в таблице
+                    current_rows = self.ports_table.rowCount()
+                    
+                    if ports_count != current_rows:
+                        # Сохраняем текущие данные портов
+                        current_ports = {}
+                        for row in range(current_rows):
+                            port_item = self.ports_table.item(row, 0)
+                            desc_item = self.ports_table.item(row, 1)
+                            if port_item and desc_item:
+                                port_num = port_item.text()
+                                if port_num:
+                                    current_ports[port_num] = {
+                                        'description': desc_item.text(),
+                                        'bold': desc_item.font().bold()
+                                    }
+                        
+                        # Устанавливаем новое количество строк
+                        self.ports_table.setRowCount(ports_count)
+                        
+                        # Заполняем порты
+                        for i in range(ports_count):
+                            port_num = str(i + 1)
+                            
+                            # Колонка "Порт"
+                            port_item = QTableWidgetItem(port_num)
+                            self.ports_table.setItem(i, 0, port_item)
+                            
+                            # Колонка "Описание"
+                            if port_num in current_ports:
+                                desc_item = QTableWidgetItem(current_ports[port_num]['description'])
+                                if current_ports[port_num]['bold']:
+                                    font = desc_item.font()
+                                    font.setBold(True)
+                                    desc_item.setFont(font)
+                            else:
+                                desc_item = QTableWidgetItem("")
+                            
+                            self.ports_table.setItem(i, 1, desc_item)
+                else:
+                    print(f"Ошибка загрузки данных модели: {data.get('error')}")
+            
+            if hasattr(self.parent_window, 'pending_requests'):
+                self.parent_window.pending_requests[request_id] = on_model_data_response
+            else:
+                self.pending_requests[request_id] = on_model_data_response
         
     def load_data(self):
         """Загрузка данных свитча в форму"""
@@ -216,8 +353,12 @@ class SwitchEditDialog(QDialog):
         self.not_installed_cb.setChecked(self.switch_data.get("notinstalled") == "-1")
         self.not_configured_cb.setChecked(self.switch_data.get("notsettings") == "-1")
         
+        # НОВОЕ: Чекбокс "Копия" - загрузка из copyid
+        copy_id = self.switch_data.get("copyid", "none")
+        self.copy_cb.setChecked(copy_id != "none" and copy_id != "")
+        
         # Основные поля
-        self.name_input.setText(self.switch_data.get("name", ""))
+        self.name_input.setPlainText(self.switch_data.get("name", ""))  # ИЗМЕНЕНО: QTextEdit
         self.ip_input.setText(self.switch_data.get("ip", ""))
         self.mac_input.setText(self.switch_data.get("mac", ""))
         
@@ -240,19 +381,47 @@ class SwitchEditDialog(QDialog):
                 self.master_combo.setCurrentText(master)
         
         # Остальные поля
-        self.power_input.setText(self.switch_data.get("power", ""))
+        self.power_input.setText(self.switch_data.get("power", ""))  # ИЗМЕНЕНО: QLineEdit
         self.location_input.setText(self.switch_data.get("location", ""))
         self.reaction_time_input.setValue(int(self.switch_data.get("reaction_time", 60)))
         self.note_input.setPlainText(self.switch_data.get("note", ""))
         self.last_editor_input.setText(self.switch_data.get("last_editor", ""))
         
-        # Загрузка портов
+        # ИЗМЕНЕНО: Загрузка портов в 2 колонки
         ports = self.switch_data.get("ports", [])
-        self.ports_table.setRowCount(len(ports))
-        for i, port in enumerate(ports):
-            item = QTableWidgetItem(port.get("description", ""))
-            self.ports_table.setItem(i, 0, item)
-            self.ports_table.setVerticalHeaderItem(i, QTableWidgetItem(str(i + 1)))
+        if ports:
+            # Находим максимальный номер порта
+            max_port = max((p.get("port_num", 0) for p in ports), default=0)
+            self.ports_table.setRowCount(max_port)
+            
+            # Заполняем порты
+            for port in ports:
+                port_num = port.get("port_num", 0)
+                if port_num > 0:
+                    row_idx = port_num - 1
+                    
+                    # Колонка "Порт"
+                    port_item = QTableWidgetItem(str(port_num))
+                    self.ports_table.setItem(row_idx, 0, port_item)
+                    
+                    # Колонка "Описание"
+                    desc_item = QTableWidgetItem(port.get("description", ""))
+                    
+                    # Проверяем, есть ли флаг bold
+                    if port.get("bold", False):
+                        font = desc_item.font()
+                        font.setBold(True)
+                        desc_item.setFont(font)
+                    
+                    self.ports_table.setItem(row_idx, 1, desc_item)
+        else:
+            # Если портов нет, создаём пустую таблицу на 24 порта
+            self.ports_table.setRowCount(24)
+            for i in range(24):
+                port_item = QTableWidgetItem(str(i + 1))
+                desc_item = QTableWidgetItem("")
+                self.ports_table.setItem(i, 0, port_item)
+                self.ports_table.setItem(i, 1, desc_item)
     
     def validate_ip(self, ip):
         """Валидация IP-адреса"""
@@ -264,7 +433,6 @@ class SwitchEditDialog(QDialog):
     
     def validate_mac(self, mac):
         """Валидация MAC-адреса"""
-        # Поддержка форматов: XX:XX:XX:XX:XX:XX или XXXXXXXXXXXX
         pattern = r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$|^[0-9A-Fa-f]{12}$'
         return re.match(pattern, mac) is not None
     
@@ -289,18 +457,27 @@ class SwitchEditDialog(QDialog):
         self.accept()
     
     def save_data(self):
-        """Сохранение данных из формы в switch_data"""
+        """Сохранение данных"""
         # Чекбоксы
         self.switch_data["notinstalled"] = "-1" if self.not_installed_cb.isChecked() else "0"
         self.switch_data["notsettings"] = "-1" if self.not_configured_cb.isChecked() else "0"
         
+        # НОВОЕ: Сохранение состояния чекбокса "Копия"
+        if self.copy_cb.isChecked():
+            # Если copyid еще не установлен, создаем новый
+            if self.switch_data.get("copyid", "none") in ["none", ""]:
+                import uuid
+                self.switch_data["copyid"] = str(uuid.uuid4())
+        else:
+            self.switch_data["copyid"] = "none"
+        
         # Основные поля
-        self.switch_data["name"] = self.name_input.text().strip()
+        self.switch_data["name"] = self.name_input.toPlainText().strip()  # ИЗМЕНЕНО: QTextEdit
         self.switch_data["ip"] = self.ip_input.text().strip()
         self.switch_data["mac"] = self.mac_input.text().strip()
         self.switch_data["model"] = self.model_combo.currentText().strip()
         self.switch_data["master"] = self.master_combo.currentText().strip()
-        self.switch_data["power"] = self.power_input.text().strip()
+        self.switch_data["power"] = self.power_input.text().strip()  # ИЗМЕНЕНО: QLineEdit
         self.switch_data["location"] = self.location_input.text().strip()
         self.switch_data["reaction_time"] = str(self.reaction_time_input.value())
         self.switch_data["note"] = self.note_input.toPlainText().strip()
@@ -310,62 +487,75 @@ class SwitchEditDialog(QDialog):
             self.switch_data["last_editor"] = self.parent_window.current_user
         self.switch_data["mod_time"] = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
         
-        # Сохранение портов
+        # ИЗМЕНЕНО: Сохранение портов из 2 колонок
         ports = []
         for i in range(self.ports_table.rowCount()):
-            item = self.ports_table.item(i, 0)
-            if item and item.text().strip():
-                ports.append({
-                    "port_num": i + 1,
-                    "description": item.text().strip()
-                })
+            port_item = self.ports_table.item(i, 0)
+            desc_item = self.ports_table.item(i, 1)
+            
+            if port_item and desc_item:
+                port_num_text = port_item.text().strip()
+                desc_text = desc_item.text().strip()
+                
+                # Сохраняем только если есть номер порта или описание
+                if port_num_text or desc_text:
+                    try:
+                        port_num = int(port_num_text) if port_num_text else (i + 1)
+                    except ValueError:
+                        port_num = i + 1
+                    
+                    # Проверяем жирный шрифт
+                    font = desc_item.font()
+                    is_bold = font.bold()
+                    
+                    if desc_text:  # Сохраняем только если есть описание
+                        ports.append({
+                            "port_num": port_num,
+                            "description": desc_text,
+                            "bold": is_bold
+                        })
+        
         self.switch_data["ports"] = ports
     
     def add_port(self):
         """Добавление нового порта"""
         row = self.ports_table.rowCount()
         self.ports_table.insertRow(row)
-        self.ports_table.setVerticalHeaderItem(row, QTableWidgetItem(str(row + 1)))
-        self.ports_table.setItem(row, 0, QTableWidgetItem(""))
-        self.ports_table.editItem(self.ports_table.item(row, 0))
+        
+        # Колонка "Порт"
+        port_item = QTableWidgetItem(str(row + 1))
+        self.ports_table.setItem(row, 0, port_item)
+        
+        # Колонка "Описание"
+        desc_item = QTableWidgetItem("")
+        self.ports_table.setItem(row, 1, desc_item)
+        
+        self.ports_table.editItem(desc_item)
     
     def remove_port(self):
         """Удаление выбранного порта"""
         current_row = self.ports_table.currentRow()
         if current_row >= 0:
-            self.ports_table.removeRow(current_row)
-            # Обновление номеров портов
-            for i in range(self.ports_table.rowCount()):
-                self.ports_table.setVerticalHeaderItem(i, QTableWidgetItem(str(i + 1)))
+            # Очищаем содержимое обеих колонок
+            port_item = self.ports_table.item(current_row, 0)
+            desc_item = self.ports_table.item(current_row, 1)
+            
+            if port_item:
+                port_item.setText("")
+            if desc_item:
+                desc_item.setText("")
     
     def toggle_bold_port(self):
         """Переключение жирного шрифта для выбранного порта"""
         current_row = self.ports_table.currentRow()
         if current_row >= 0:
-            item = self.ports_table.item(current_row, 0)
-            if item:
-                font = item.font()
-                font.setBold(not font.bold())
-                item.setFont(font)
-    
-    def copy_to_clipboard(self):
-        """Копирование данных свитча в буфер обмена"""
-        from PyQt6.QtGui import QGuiApplication
-        
-        text = f"Имя: {self.name_input.text()}\n"
-        text += f"IP: {self.ip_input.text()}\n"
-        text += f"MAC: {self.mac_input.text()}\n"
-        text += f"Модель: {self.model_combo.currentText()}\n"
-        text += f"Мастер: {self.master_combo.currentText()}\n"
-        text += f"Питание: {self.power_input.text()}\n"
-        text += f"Локация: {self.location_input.text()}\n"
-        
-        clipboard = QGuiApplication.clipboard()
-        clipboard.setText(text)
-        
-        # Показать уведомление
-        if hasattr(self.parent_window, 'status_bar'):
-            self.parent_window.status_bar.showMessage("Данные скопированы в буфер обмена", 2000)
+            # Применяем жирный шрифт к обеим колонкам
+            for col in [0, 1]:
+                item = self.ports_table.item(current_row, col)
+                if item:
+                    font = item.font()
+                    font.setBold(not font.bold())
+                    item.setFont(font)
     
     def apply_styles(self):
         """Применение стилей в стиле приложения"""

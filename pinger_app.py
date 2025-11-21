@@ -299,6 +299,11 @@ class MainWindow(QMainWindow):
 
         self.setStyleSheet("""
             QMainWindow { background-color: #333; }
+            QMessageBox { background-color: #333; color: #FFC107; border: 1px solid #FFC107; }
+            QMessageBox QLabel { color: #FFC107; font-size: 13px; }
+            QMessageBox QPushButton { min-width: 80px; min-height: 16px; padding: 6px 14px; background-color: #444; color: #FFC107; border: 1px solid #555;
+            border-radius: 6px; }
+            QMessageBox QPushButton:hover { background-color: #555; }
             QMenuBar { background-color: #333; color: #FFC107; border-bottom: 3px solid #FFC107; padding: 5px 0px 5px 0px; min-height: 15px; }
             QMenuBar::item { background-color: #333; color: #FFC107; }
             QMenuBar::item:selected { background-color: #555; }
