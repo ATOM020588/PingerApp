@@ -55,9 +55,9 @@ class AddSwitchDialog(QDialog):
             QPushButton { background-color: #444; color: #FFC107; border: 1px solid #555; border-radius: 4px; padding: 6px 16px; min-width: 60px; } 
             QPushButton:hover { background-color: #555; } 
             QPushButton:pressed { background-color: #666; }
-            QCheckBox, QRadioButton { color: #FFC107; padding: 3px; border: none; } 
-            QCheckBox::indicator, QRadioButton::indicator { width: 14px; height: 14px; border: 1px solid #555; background: #444; } 
-            QCheckBox::indicator:checked, QRadioButton::indicator:checked { background: #FFC107; }
+            QCheckBox { color: #FFC107; padding: 3px; border: none; } 
+            QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid #555; background: #444; } 
+            QCheckBox::indicator:checked { background: #FFC107; }
             QTableWidget { background-color: #444; color: #FFC107; border: 1px solid #555; gridline-color: #555; border-radius: 4px; } 
             QHeaderView::section { background-color: #555; color: #FFC107; padding: 6px; border: none; font-weight: bold; } 
             QTableWidget::item:hover { background-color: #555; } 
@@ -69,6 +69,11 @@ class AddSwitchDialog(QDialog):
             QTabBar::tab:hover { background-color: #555; }
             QGroupBox { border: 1px solid #555; border-radius: 6px; margin-top: 10px; padding: 8px; font-weight: bold; color: #FFC107; } 
             QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0px 3px; }
+            QScrollArea { background: transparent; color: #FFC107; padding: 0px; border: none; }
+            QRadioButton { color: #FFC107; border: none; padding: 0px; }
+            QRadioButton::indicator { width: 14px; height: 14px; border: 1px solid #FFC107; border-radius: 7px; background: transparent; }
+            QRadioButton::indicator:checked { background: #FFC107; }
+            
         """
 
     def load_data_from_server(self):
@@ -148,7 +153,7 @@ class AddSwitchDialog(QDialog):
 
         # Колонка 2 - Neobills
         column2 = self.create_column2_neobills()
-        main_layout.addLayout(column2, stretch=1)
+        main_layout.addWidget(column2, stretch=1)
 
         # Колонка 3 - DHCP
         column3 = self.create_column3_dhcp()
@@ -184,15 +189,36 @@ class AddSwitchDialog(QDialog):
         layout.addLayout(row)
         row = QHBoxLayout()
         self.master_combo = QComboBox()
-        self.master_combo.setMaximumWidth(150)
+        #self.master_combo.setMaximumWidth(200)
         row.addWidget(self.master_combo)
         row.addSpacing(10)  # необязательно, просто для красоты
         self.vlan_combo = QComboBox()
-        self.vlan_combo.setMaximumWidth(150)
+        #self.vlan_combo.setMaximumWidth(150)
         row.addWidget(self.vlan_combo)
         # Добавляем строку в основной layout
         layout.addLayout(row)
 
+        # Магистральные порты и UPLINK
+        mags_uplink_layout = QHBoxLayout()
+
+        # Магистральные порты
+        mags_layout = QVBoxLayout()
+        mags_layout.addWidget(QLabel("Серийный номер"))
+        self.mags_edit = QLineEdit()
+        mags_layout.addWidget(self.mags_edit)
+        mags_uplink_layout.addLayout(mags_layout)
+
+        # Uplink:
+        uplink_layout = QVBoxLayout()
+        uplink_layout.addWidget(QLabel("Uplink:"))
+        self.uplink_edit = QLineEdit()
+        self.uplink_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        uplink_layout.addWidget(self.uplink_edit)
+        mags_uplink_layout.addLayout(uplink_layout)
+
+        layout.addLayout(mags_uplink_layout)
+        
+        
         # MAC и IP в одной строке, уменьшены в 2 раза
         mac_ip_layout = QHBoxLayout()
 
@@ -200,7 +226,7 @@ class AddSwitchDialog(QDialog):
         mac_layout = QVBoxLayout()
         mac_layout.addWidget(QLabel("MAC"))
         self.mac_edit = QLineEdit()
-        self.mac_edit.setMaximumWidth(95)  # Уменьшено в 2 раза
+        #self.mac_edit.setMaximumWidth(95)  # Уменьшено в 2 раза
         mac_layout.addWidget(self.mac_edit)
         mac_ip_layout.addLayout(mac_layout)
 
@@ -208,15 +234,15 @@ class AddSwitchDialog(QDialog):
         ip_layout = QVBoxLayout()
         ip_layout.addWidget(QLabel("IP"))
         self.ip_edit = QLineEdit("172.27.4.7")
-        self.ip_edit.setMaximumWidth(95)  # Уменьшено в 2 раза
+        self.ip_edit.setMaximumWidth(90)  # Уменьшено в 2 раза
         ip_layout.addWidget(self.ip_edit)
         mac_ip_layout.addLayout(ip_layout)
 
         # Кнопка IP
         ip_btn_layout = QVBoxLayout()
         ip_btn_layout.addWidget(QLabel(""))  # Пустая метка для выравнивания
-        self.ip_button = QPushButton("IP")
-        self.ip_button.setMaximumWidth(40)
+        self.ip_button = QPushButton("Смена IP")
+        self.ip_button.setMaximumWidth(20)
         ip_btn_layout.addWidget(self.ip_button)
         mac_ip_layout.addLayout(ip_btn_layout)
 
@@ -229,7 +255,7 @@ class AddSwitchDialog(QDialog):
         serial_layout = QVBoxLayout()
         serial_layout.addWidget(QLabel("Серийный номер"))
         self.serial_edit = QLineEdit()
-        self.serial_edit.setMaximumWidth(95)
+        #self.serial_edit.setMaximumWidth(95)
         serial_layout.addWidget(self.serial_edit)
         serial_password_layout.addLayout(serial_layout)
 
@@ -238,7 +264,7 @@ class AddSwitchDialog(QDialog):
         password_layout.addWidget(QLabel("Пароль"))
         self.password_edit = QLineEdit()
         self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.password_edit.setMaximumWidth(95)
+        #self.password_edit.setMaximumWidth(95)
         password_layout.addWidget(self.password_edit)
         serial_password_layout.addLayout(password_layout)
 
@@ -265,7 +291,7 @@ class AddSwitchDialog(QDialog):
         # Поле "Реакция"
         layout.addWidget(QLabel("Реакция"))
         self.reaction_edit = QLineEdit()
-        self.reaction_edit.setMaximumWidth(200)
+        self.reaction_edit.setMaximumWidth(100)
         self.reaction_edit.setPlaceholderText("60")
         layout.addWidget(self.reaction_edit)
 
@@ -275,8 +301,10 @@ class AddSwitchDialog(QDialog):
         # Кнопки "Добавить" и "Сброс" внизу
         bottom_buttons_layout = QHBoxLayout()
         self.add_button = QPushButton("Добавить")
+        self.add_button.setFixedHeight(65)
         self.add_button.clicked.connect(self.on_add_switch)
         self.reset_button = QPushButton("Сброс")
+        self.reset_button.setFixedHeight(65)
         self.reset_button.clicked.connect(self.reset_fields)
         bottom_buttons_layout.addWidget(self.add_button)
         bottom_buttons_layout.addWidget(self.reset_button)
@@ -285,20 +313,24 @@ class AddSwitchDialog(QDialog):
         return layout
 
     def create_column2_neobills(self):
-        """Создание колонки 2 - Neobills (на всю высоту)"""
-        layout = QVBoxLayout()
+        """Создание колонки 2 — Neobills (фиксированная ширина)"""
+
+        container = QWidget()
+        container.setFixedWidth(260)  # ширина колонки
+
+        layout = QVBoxLayout(container)
         layout.setSpacing(8)
 
-        # Neobilis
+        # ===== Neobilis =====
         neobilis_layout = QHBoxLayout()
         self.neobilis_check = QCheckBox()
         neobilis_label = QLabel("Neobilis")
-        neobilis_layout.addWidget(self.neobilis_check)  # слева чекбокс
-        neobilis_layout.addWidget(neobilis_label)       # справа текст
-        neobilis_layout.addStretch()  # чтобы прижать всё к левому краю
+        neobilis_layout.addWidget(self.neobilis_check)
+        neobilis_layout.addWidget(neobilis_label)
+        neobilis_layout.addStretch()
         layout.addLayout(neobilis_layout)
 
-        # Выбор устройства
+        # ===== Выбор устройства =====
         self.device_combo = QComboBox()
         self.device_combo.addItems([
             "D-Link DGS-3200-10 B1",
@@ -307,44 +339,50 @@ class AddSwitchDialog(QDialog):
         ])
         layout.addWidget(self.device_combo)
 
-        # Заголовки колонок (MAC, PORT, NONE)
-        headers_layout = QHBoxLayout()
-        headers_layout.addWidget(QLabel(""))  # Для номера порта
-        mac_label = QLabel("MAC")
-        mac_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        headers_layout.addWidget(mac_label)
-        port_label = QLabel("PORT")
-        port_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        headers_layout.addWidget(port_label)
-        none_label = QLabel("NONE")
-        none_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        headers_layout.addWidget(none_label)
-        layout.addLayout(headers_layout)
+        # ===================== ЗАГОЛОВКИ =====================
+        headers = QHBoxLayout()
 
-        # Скролл область для портов
+        COL_W_NUM   = 30
+        COL_W_MAC   = 70
+        COL_W_PORT  = 60
+        COL_W_NONE  = 60
+
+        def mk_header(text, width):
+            lbl = QLabel(text)
+            lbl.setFixedWidth(width)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            return lbl
+
+        headers.addWidget(mk_header("№", COL_W_NUM))
+        headers.addWidget(mk_header("MAC", COL_W_MAC))
+        headers.addWidget(mk_header("PORT", COL_W_PORT))
+        headers.addWidget(mk_header("NONE", COL_W_NONE))
+
+        layout.addLayout(headers)
+
+        # ===================== SCROLL =====================
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         scroll_widget = QWidget()
+        scroll_widget.setFixedWidth(260)   # ← ВАЖНО: фиксируем ширину контента, не scroll
+
         self.ports_layout = QVBoxLayout(scroll_widget)
         self.ports_layout.setSpacing(4)
 
-        # Список для хранения радиокнопок портов
         self.port_radio_groups = []
-
-        # Создаем порты (по умолчанию 10 портов, будет обновляться при выборе модели)
-        self.create_port_rows(10)
-
+        #self.create_port_rows(10)
+        scroll_widget.setStyleSheet("background: transparent; border: none;")
         scroll.setWidget(scroll_widget)
         layout.addWidget(scroll)
 
-        # НЕ добавляем addStretch() чтобы колонка занимала всю высоту
-        return layout
+        return container
+
 
     def create_port_rows(self, num_ports):
-        """Создание строк с радиокнопками для портов"""
-        # Очищаем существующие строки
+        """Создание идеально ровных строк с радиокнопками"""
+
         while self.ports_layout.count():
             item = self.ports_layout.takeAt(0)
             if item.widget():
@@ -352,46 +390,62 @@ class AddSwitchDialog(QDialog):
 
         self.port_radio_groups.clear()
 
-        # Создаем строки для каждого порта
+        COL_W_NUM   = 30
+        COL_W_MAC   = 70
+        COL_W_PORT  = 60
+        COL_W_NONE  = 60
+
+        def centered_radio(width):
+            """Создаёт виджет фиксированной ширины, центрирует радиокнопку внутри"""
+            wrapper = QWidget()
+            wrapper.setFixedWidth(width)
+            w_layout = QHBoxLayout(wrapper)
+            w_layout.setContentsMargins(0, 0, 0, 0)
+            w_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            radio = QRadioButton()
+            radio.setText("")       # обязательно
+            w_layout.addWidget(radio)
+            return wrapper, radio
+
         for port_num in range(1, num_ports + 1):
-            row_layout = QHBoxLayout()
-            row_layout.setSpacing(4)
 
-            # Номер порта
-            port_label = QLabel(f"{port_num}")
-            port_label.setFixedWidth(30)
-            port_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            row_layout.addWidget(port_label)
+            row = QHBoxLayout()
+            row.setSpacing(0)
 
-            # Группа радиокнопок для этого порта
+            # ===== № =====
+            lbl = QLabel(str(port_num))
+            lbl.setFixedWidth(COL_W_NUM)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            row.addWidget(lbl)
+
             button_group = QButtonGroup()
 
-            # MAC
-            mac_radio = QRadioButton()
+            # ===== MAC =====
+            mac_widget, mac_radio = centered_radio(COL_W_MAC)
             button_group.addButton(mac_radio, 0)
-            row_layout.addWidget(mac_radio, alignment=Qt.AlignmentFlag.AlignCenter)
+            row.addWidget(mac_widget)
 
-            # PORT
-            port_radio = QRadioButton()
+            # ===== PORT =====
+            port_widget, port_radio = centered_radio(COL_W_PORT)
             button_group.addButton(port_radio, 1)
-            row_layout.addWidget(port_radio, alignment=Qt.AlignmentFlag.AlignCenter)
+            row.addWidget(port_widget)
 
-            # NONE (выбран по умолчанию)
-            none_radio = QRadioButton()
+            # ===== NONE =====
+            none_widget, none_radio = centered_radio(COL_W_NONE)
             none_radio.setChecked(True)
             button_group.addButton(none_radio, 2)
-            row_layout.addWidget(none_radio, alignment=Qt.AlignmentFlag.AlignCenter)
+            row.addWidget(none_widget)
 
             self.port_radio_groups.append(button_group)
-            self.ports_layout.addLayout(row_layout)
+            self.ports_layout.addLayout(row)
 
         self.ports_layout.addStretch()
+
 
     def on_model_changed(self):
         """Обработчик изменения модели - обновляет количество портов"""
         model = self.model_combo.currentText()
 
-        # Определяем количество портов по модели
         num_ports = 10  # по умолчанию
 
         if "3200-28" in model or "3028" in model or "3526" in model:
@@ -411,8 +465,8 @@ class AddSwitchDialog(QDialog):
         elif "P3600-16" in model:
             num_ports = 16
 
-        # Обновляем количество портов
         self.create_port_rows(num_ports)
+
 
     def create_column3_dhcp(self):
         """Создание колонки 3 - DHCP"""
