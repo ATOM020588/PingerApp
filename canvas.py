@@ -10,11 +10,11 @@ import webbrowser
 import requests
 from PyQt6.QtWidgets import (
     QGraphicsPixmapItem, QMessageBox, QGraphicsTextItem, QGraphicsRectItem, QGraphicsLineItem, QGraphicsItem, QGraphicsEllipseItem,
-    QGraphicsView, QGraphicsScene, QMenu, QDialog, QLineEdit,
+    QGraphicsView, QGraphicsScene, QMenu, QDialog, QLineEdit, QGraphicsSimpleTextItem,
     QPushButton, QLabel, QTableWidget, QTableWidgetItem,
     QHeaderView, QComboBox, QTextEdit
 )
-from PyQt6.QtGui import QAction, QColor, QBrush, QPen, QPainter, QPixmap
+from PyQt6.QtGui import QAction, QColor, QBrush, QPen, QPainter, QPixmap, QFontMetrics, QFont
 from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF
 
 from widgets import SwitchInfoDialog, PlanSwitchInfoDialog, AddPlanedSwitch, SwitchEditDialog
@@ -340,7 +340,7 @@ class MapCanvas(QGraphicsView):
                 font.setPixelSize(12)
                 font.setBold(True)
                 text_item.setFont(font)
-                text_item.setPos(x - text_item.boundingRect().width()/2, y + h/2 + 5)
+                text_item.setPos(x - text_item.boundingRect().width()/2, y + h/2 + 2)
                 text_item.setZValue(4)
                 items.append(text_item)
 
@@ -636,44 +636,50 @@ class MapCanvas(QGraphicsView):
         text_x = pos[0] + dx * distance
         text_y = pos[1] + dy * distance
         
-        # Создаем текст
-        text_item = self.scene.addText(str(port_text))
-        text_item.setDefaultTextColor(QColor(color))
-        font = text_item.font()
-        # ИСПРАВЛЕНИЕ 4: Увеличиваем шрифт с 10 до 11
-        font.setPixelSize(11)
-        font.setBold(False)
+        # Создаём текст через QGraphicsSimpleTextItem
+        text = str(port_text)
+        text_item = QGraphicsSimpleTextItem(text)
+        text_item.setBrush(QBrush(QColor(color)))
+
+        font = QFont()
+        font.setPixelSize(12)
+        font.setBold(True)
         text_item.setFont(font)
-        
-        # Получаем размеры текста
-        text_rect = text_item.boundingRect()
-        text_width = text_rect.width()
-        text_height = text_rect.height()
-        
-        # ИСПРАВЛЕНИЕ: Уменьшаем отступы квадрата от текста
-        padding_horizontal = 0.5
-        padding_vertical = 0.5
-        
-        rect_width = text_width + 2 * padding_horizontal
+
+        # Добавляем текст в сцену — обязательно!
+        self.scene.addItem(text_item)
+
+        # Фактические размеры текста
+        fm = QFontMetrics(font)
+        text_width = fm.horizontalAdvance(text)
+        text_height = fm.height()
+
+        # Паддинги (тонкие как в образце)
+        padding_horizontal = 3
+        padding_vertical = 1
+
+        rect_width  = text_width  + 2 * padding_horizontal
         rect_height = text_height + 2 * padding_vertical
-        
-        # Центрируем прямоугольник относительно text_x, text_y
+
         rect_x = text_x - rect_width / 2
         rect_y = text_y - rect_height / 2
-        
-        # ИСПРАВЛЕНИЕ 2: Рисуем рамку цветом порта (startportcolor/endportcolor)
+
+        # Рамка
         rect_item = self.scene.addRect(
             rect_x, rect_y, rect_width, rect_height,
             pen=QPen(QColor(color), 1),
             brush=QBrush(QColor("#008080"))
         )
-        rect_item.setZValue(10)  # Поверх магистрали
-        
-        # Позиционируем текст с учетом отступов
-        text_item.setPos(rect_x + padding_horizontal, rect_y + padding_vertical)
-        text_item.setZValue(11)  # Поверх прямоугольника
-        
-        # Добавляем в список элементов магистрали
+        rect_item.setZValue(10)
+
+        # Центрированный текст
+        text_item.setPos(
+            rect_x + padding_horizontal,
+            rect_y + padding_vertical
+        )
+        text_item.setZValue(11)
+
+        # Сохраняем элементы
         self.magistral_items.append(rect_item)
         self.magistral_items.append(text_item)
 
